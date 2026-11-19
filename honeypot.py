@@ -715,17 +715,8 @@ class Evidence:
                 (rec.get("rtsp_uri") or "")))
 
     def alert(self, rec, body_bytes=None):
-        tags = ",".join(rec.get("tags", []))
-        line = "%s severity=%s ip=%s tags=%s method=%s path=%s" % (
-            rec["ts"], rec.get("severity", "low"), rec["ip"], tags,
-            rec.get("method", "-"), rec.get("path", "-"))
-        self._append("alerts.jsonl", rec)
-        with self._lock:
-            try:
-                with open(os.path.join(self.dir, "alerts.log"), "a", encoding="utf-8") as f:
-                    f.write(line + "\n")
-            except Exception:
-                pass
+        # save the raw payload FIRST so rec["body_file"] is part of the
+        # record, the alerts.log line, the webhook and the dashboard link
         if body_bytes:
             ext = "txt"
             try:
@@ -742,6 +733,25 @@ class Evidence:
                 rec["body_file"] = "drops/" + fname
             except Exception:
                 pass
+
+        tags = ",".join(rec.get("tags", []))
+        line = "%s severity=%s ip=%s tags=%s method=%s path=%s" % (
+            rec["ts"], rec.get("severity", "low"), rec["ip"], tags,
+            rec.get("method", "-"), rec.get("path", "-"))
+        payload = self._payload_raw(rec)
+        if payload:
+            flat = (payload.replace("\\", "\\\\").replace('"', '\\"')
+                    .replace("\r", "").replace("\n", "\\n"))
+            line += ' payload="%s"' % flat[:500]
+        if rec.get("body_file"):
+            line += ' evidence="%s"' % rec["body_file"]
+        self._append("alerts.jsonl", rec)
+        with self._lock:
+            try:
+                with open(os.path.join(self.dir, "alerts.log"), "a", encoding="utf-8") as f:
+                    f.write(line + "\n")
+            except Exception:
+                pass
         self._console(rec)
         if ARGS.webhook:
             try:
@@ -749,9 +759,87 @@ class Evidence:
             except queue.Full:
                 pass
 
+    @staticmethod
+    def _payload_raw(rec):
+        """What the attacker actually sent: the request body, or — for stream
+        writes where go2rtc takes the payload as query params — the decoded
+        query string."""
+        body = rec.get("body") or ""
+        if not body and rec.get("query"):
+            body = urllib.parse.unquote_plus(rec["query"])
+        return body.strip()
+
+    def _webhook_format(self):
+        fmt = ARGS.webhook_format
+        if fmt == "auto":
+            u = ARGS.webhook or ""
+            if "discord.com/api/webhooks" in u or "discordapp.com/api/webhooks" in u:
+                return "discord"
+            if "hooks.slack.com" in u:
+                return "slack"
+            return "generic"
+        return fmt
+
+    def _webhook_body(self, rec):
+        """Build the notification payload. Discord and Slack reject arbitrary
+        JSON, so shape the alert into what they actually render — with the
+        attacker's payload front and centre."""
+        fmt = self._webhook_format()
+        if fmt == "generic":
+            return rec   # raw alert record for custom relays/automation
+
+        sev = rec.get("severity", "low")
+        tags = ",".join(rec.get("tags", [])) or "-"
+        payload = self._payload_raw(rec)
+        note = rec.get("note") or ""
+        corrections = []
+
+        def field(name, value, inline=False, limit=1000):
+            if value:
+                corrections.append({"name": name, "value": str(value)[:limit],
+                                    "inline": inline})
+
+        field("Attacker", "`%s`" % rec.get("ip", "?"), True)
+        field("Severity", sev.upper(), True)
+        field("Request", "`%s %s`" % (rec.get("method", "-"), rec.get("path", "-")), True)
+        if rec.get("peer"):
+            field("Via proxy", "`%s`" % rec["peer"], True)
+        if payload:
+            field("Payload (what they sent)", "```\n%s\n```" % payload[:900])
+        if note:
+            field("What it means", note[:900])
+        if rec.get("body_file"):
+            field("Evidence file", rec["body_file"], True)
+
+        if fmt == "slack":
+            color = {"high": "danger", "medium": "warning"}.get(sev, "#95a5a6")
+            return {
+                "text": "🍯 honeypot alert: %s from %s" % (tags, rec.get("ip", "?")),
+                "attachments": [{
+                    "color": color,
+                    "title": "好甜的蜜罐 · %s" % tags,
+                    "fields": [{"title": f["name"], "value": f["value"], "short": f["inline"]}
+                               for f in corrections],
+                    "footer": rec.get("ts", ""),
+                }],
+            }
+
+        # discord
+        color = {"high": 0xE74C3C, "medium": 0xE67E22}.get(sev, 0x95A5A6)
+        return {
+            "embeds": [{
+                "title": "🍯 好甜的蜜罐 · %s" % tags[:200],
+                "color": color,
+                "timestamp": rec.get("ts", ""),
+                "fields": corrections[:6],
+                "footer": {"text": "go2rtc honeypot · %s" % rec.get("path", "")},
+            }],
+        }
+
     def _console(self, rec):
         sev = rec.get("severity", "low")
-        preview = (rec.get("body") or rec.get("path") or "")[:160].replace("\n", " ")
+        preview = (self._payload_raw(rec) or rec.get("path") or "")
+        preview = preview.replace("\n", " ")[:400 if sev != "low" else 160]
         head = "🍯 ALERT %-15s %-4s %-24s [%s]" % (
             rec["ip"], rec.get("method", "?"), rec.get("path", "?"),
             ",".join(rec.get("tags", [])))
@@ -772,16 +860,17 @@ class Evidence:
         while True:
             rec = self.wq.get()
             try:
+                data = json.dumps(self._webhook_body(rec), ensure_ascii=False).encode("utf-8")
                 req = urllib.request.Request(
-                    ARGS.webhook, data=json.dumps(rec, ensure_ascii=False).encode("utf-8"),
+                    ARGS.webhook, data=data,
                     headers={"Content-Type": "application/json",
                              "User-Agent": "haotian-miguan/1.0"}, method="POST")
                 urllib.request.urlopen(req, timeout=5)
                 self._webhook_fail = 0
-            except Exception:
+            except Exception as e:
                 self._webhook_fail += 1
                 if self._webhook_fail == 1:
-                    CON.warn("webhook delivery failed (will stay quiet unless it recovers)")
+                    CON.warn("webhook delivery failed: %s" % e)
 
 
 # ---------------------------------------------------------------------------
@@ -2781,7 +2870,14 @@ def parse_args():
     p.add_argument("--config-file", default=None,
                    help="optional YAML file to seed the fake go2rtc.yaml with")
     p.add_argument("--webhook", default=None,
-                   help="POST each alert as JSON to this URL (Discord/Slack/relay)")
+                   help="POST each alert as JSON to this URL (Discord/Slack/"
+                        "relay). Discord and Slack URLs are auto-detected and "
+                        "shaped correctly, payload included")
+    p.add_argument("--webhook-format", default="auto",
+                   choices=["auto", "discord", "slack", "generic"],
+                   help="alert payload shape: auto-detects Discord/Slack "
+                        "webhook URLs; 'generic' posts the raw alert record "
+                        "as JSON for custom automation (default: auto)")
     p.add_argument("--max-body-mb", type=int, default=8, help="request body cap in MiB")
     p.add_argument("--reset", action="store_true", help="reset fake state before start")
     p.add_argument("--trust-proxy", action="store_true",

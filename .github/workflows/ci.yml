@@ -64,6 +64,25 @@ jobs:
           test "$GOT2" = "127.0.0.1"
           kill $POT 2>/dev/null || true
 
+      - name: Dashboard (payloads displayed, XSS-escaped)
+        run: |
+          python3 honeypot.py --port 19848 --rtsp-port 0 --data-dir /tmp/dash --quiet --no-color &
+          POT=$!
+          for i in $(seq 1 20); do curl -sf http://127.0.0.1:19848/api >/dev/null && break; sleep 0.5; done
+          curl -s -o /dev/null -X POST --data-binary \
+            $'streams:\n  dash_pwn: ffmpeg:rtsp://x#command=id\n  xss: rtsp://x/<script>alert(1)</script>\n' \
+            http://127.0.0.1:19848/api/config
+          python3 dashboard.py --data-dir /tmp/dash --port 19851 &
+          DASH=$!
+          for i in $(seq 1 20); do curl -sf http://127.0.0.1:19851/ >/dev/null && break; sleep 0.5; done
+          curl -s http://127.0.0.1:19851/ > /tmp/dash.html
+          grep -q "Configs attackers tried to apply" /tmp/dash.html
+          grep -q "command=id" /tmp/dash.html          # the applied payload is shown
+          grep -q "&lt;script&gt;" /tmp/dash.html       # hostile markup escaped
+          ! grep -q "<script>alert" /tmp/dash.html
+          curl -s http://127.0.0.1:19851/data.json | grep -q dash_pwn
+          kill $POT $DASH 2>/dev/null || true
+
       - name: Hybrid mode (real instance + honeypot seam)
         run: |
           # A stands in for the user's real go2rtc; B is the hybrid pot

@@ -127,20 +127,42 @@ curl -s http://127.0.0.1:1984/api       # {"version": "1.8.5", …}
 
 ```bash
 python3 report.py                       # pretty catch report
+python3 dashboard.py                    # live web page → http://127.0.0.1:8080
 python3 report.py --json                # for shipping elsewhere
+```
+
+The **dashboard** is the easiest way to read the catch: it shows *Configs
+attackers tried to apply* — each payload exactly as it was sent, escaped
+and never executed — plus the streams they planted, the alerts feed, and
+tag/IP counters. It serves `?format`-free plain HTML (auto-refresh, pause
+link), a `data.json` endpoint, and links to the raw evidence drops.
+localhost-bound by default; if you expose it, put auth in front.
+
+```bash
+# dockerised, over the same evidence volume as the pot:
+docker run --rm -p 127.0.0.1:8080:8080 \
+  -v haotian-miguan_honeypot_data:/data \
+  ghcr.io/jsserve-org/haotian-miguan:latest \
+  python3 dashboard.py --data-dir /data --host 0.0.0.0 --port 8080
 ```
 
 ### Options
 
 ```
 --host 0.0.0.0          bind address                --rtsp-port 8554   0 disables RTSP
---port 1984             fake go2rtc API port        --webhook URL      POST alerts as JSON
---data-dir ./data       evidence + state dir       --max-body-mb 8    request body cap
---version-string 1.8.5  version to advertise      --config-path-label /config/go2rtc.yaml
---config-file FILE      seed the fake go2rtc.yaml  --reset            wipe fake state
---trust-proxy           behind your nginx: evidence IP from X-Real-IP / rightmost XFF hop
---quiet                 only alerts on console     --no-color         plain console
+--port 1984             fake go2rtc API port        --webhook URL      POST alerts (Discord/Slack/relay)
+--data-dir ./data       evidence + state dir       --webhook-format   auto|discord|slack|generic
+--max-body-mb 8         request body cap           --version-string 1.8.5   version to advertise
+--config-path-label /config/go2rtc.yaml            --config-file FILE   seed the fake go2rtc.yaml
+--reset                 wipe fake state            --trust-proxy        evidence IP from X-Real-IP
+--quiet                 only alerts on console     --no-color           plain console
 ```
+
+Webhook format is auto-detected from the URL (Discord webhooks and Slack
+incoming webhooks get native embeds/attachments with the attacker's payload
+in a code block; anything else receives the raw alert record as JSON for
+your own automation). `alerts.log` carries the same payload, one escaped
+line, for `tail -f` and fail2ban.
 
 ### Hybrid mode: your REAL go2rtc with the fangs swapped
 
@@ -442,11 +464,16 @@ verify before escalating.
 
 ```
 honeypot.py   the whole honeypot (stdlib only, single-file deploy)
+dashboard.py  live catch dashboard — shows the configs attackers tried to apply
 report.py     catch report / summary tool
 smoke_test.sh 23-point fidelity + trap verification suite
-Dockerfile, docker-compose.yml, .dockerignore
-.github/workflows/    CI smoke test + multi-arch build → GH Packages
-extras/fail2ban/   filter + jail for auto-banning caught IPs
+Dockerfile, docker-compose.yml, docker-compose.proxy.yml,
+            docker-compose.hybrid.yml, docker-compose.build.yml, .dockerignore
+.github/workflows/    CI (fidelity, trust-proxy, hybrid seam, dashboard, webhooks)
+                      + multi-arch build → GH Packages
+extras/nginx/     the full hybrid vhost (go2rtc-hybrid.conf)
+extras/fail2ban/  filter + jail for auto-banning caught IPs
+extras/tests/     webhook capture + assertions used by CI
 assets/camera_frame.jpg   the fake night-cam frame (embedded at build time)
 ```
 

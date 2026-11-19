@@ -5,7 +5,7 @@ LABEL org.opencontainers.image.description="Deception honeypot impersonating an 
 
 WORKDIR /app
 
-COPY honeypot.py report.py ./
+COPY honeypot.py report.py dashboard.py ./
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1
