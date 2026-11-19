@@ -20,6 +20,12 @@ jobs:
       - name: Byte-compile
         run: python3 -m py_compile honeypot.py report.py
 
+      - name: Compose file validation
+        run: |
+          docker compose -p haotian-miguan -f docker-compose.yml        config -q
+          docker compose -p haotian-miguan -f docker-compose.proxy.yml  config -q
+          docker compose -p haotian-miguan -f docker-compose.build.yml  config -q
+
       - name: Run the pot and verify the illusion
         run: |
           python3 honeypot.py --port 19841 --rtsp-port 18554 --data-dir /tmp/smoke-data --quiet --no-color &

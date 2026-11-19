@@ -50,7 +50,14 @@ services:
     environment:
       - TZ=UTC
     command:
-      - "--trust-proxy"
+      # replaces the Dockerfile CMD — keep the essentials and add the flag
+      - "python3"
+      - "honeypot.py"
+      - "--host"
+      - "0.0.0.0"
+      - "--data-dir"
+      - "/data"
+      - "--trust-proxy"   # evidence IPs come from X-Real-IP (set by nginx) instead of the proxy's IP
     read_only: true
     user: "65534:65534"
     cap_drop:
