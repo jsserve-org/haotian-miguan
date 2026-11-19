@@ -134,17 +134,27 @@ python3 report.py --json                # for shipping elsewhere
 The **dashboard** is the easiest way to read the catch: it shows *Configs
 attackers tried to apply* — each payload exactly as it was sent, escaped
 and never executed — plus the streams they planted, the alerts feed, and
-tag/IP counters. It serves `?format`-free plain HTML (auto-refresh, pause
-link), a `data.json` endpoint, and links to the raw evidence drops.
-localhost-bound by default; if you expose it, put auth in front.
+tag/IP counters. It serves plain HTML (auto-refresh, pause link), a
+`data.json` endpoint, and links to the raw evidence drops.
+
+It is **independent of the deployment mode** — direct, proxy or hybrid —
+because it only reads the evidence directory. Every image-based compose
+file ships it as an opt-in `dashboard` service on `127.0.0.1:8080`; for
+anything else, run it against the same volume:
 
 ```bash
-# dockerised, over the same evidence volume as the pot:
-docker run --rm -p 127.0.0.1:8080:8080 \
-  -v haotian-miguan_honeypot_data:/data \
+# reuse the pot's volumes (no volume-name guessing):
+docker run --rm -p 127.0.0.1:8080:8080 --volumes-from haotian-miguan \
   ghcr.io/jsserve-org/haotian-miguan:latest \
   python3 dashboard.py --data-dir /data --host 0.0.0.0 --port 8080
+
+# or on bare metal, pointed at the evidence dir:
+python3 dashboard.py --data-dir ./data
 ```
+
+It has no authentication by design and binds to localhost — for remote
+viewing use an SSH tunnel (`ssh -L 8080:127.0.0.1:8080 your-host`) or put
+auth in front.
 
 ### Options
 
