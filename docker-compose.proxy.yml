@@ -1,0 +1,62 @@
+# 好甜的蜜罐 — behind your nginx reverse proxy
+#   docker compose -f docker-compose.proxy.yml up -d
+#
+# Matches the common "proxy_pass http://172.17.0.1:1984" pattern:
+#   - host ports shifted to 19840 / 18554 so they never collide with a
+#     REAL go2rtc already publishing 1984 / 8554 on the same host
+#   - the HTTP port binds ONLY to the docker bridge IP, so the pot is
+#     reachable by nginx (host or container) but not directly from the
+#     internet — all decoy traffic flows through the proxy
+#   - --trust-proxy makes evidence record the attacker's real IP from
+#     X-Real-IP instead of your nginx's address
+#
+# nginx side (decoy vhost — do NOT copy the "no thank you" blocks from
+# your real instance; on the decoy /api/config IS the bait):
+#
+#   server {
+#       listen 80;                      # add default_server to also catch bare-IP scans
+#       server_name cam.example.com;    # your decoy hostname
+#       client_max_body_size 16m;       # let beefy malicious configs reach the pot
+#       location / {
+#           proxy_pass http://172.17.0.1:19840;
+#           proxy_http_version 1.1;
+#           proxy_set_header Host $host;
+#           proxy_set_header X-Real-IP $remote_addr;                 # evidence IP
+#           proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+#           proxy_set_header X-Forwarded-Proto $scheme;
+#           proxy_set_header Upgrade $http_upgrade;
+#           proxy_set_header Connection $connection_upgrade;
+#           proxy_read_timeout 3600s;
+#           proxy_send_timeout 3600s;
+#           proxy_buffering off;
+#           proxy_cache off;
+#       }
+#   }
+
+services:
+  haotian-miguan:
+    image: ghcr.io/jsserve-org/haotian-miguan:latest
+    container_name: haotian-miguan
+    restart: unless-stopped
+    ports:
+      # nginx → http://172.17.0.1:19840
+      # (host-level nginx? "127.0.0.1:19840:1984" works too)
+      - "172.17.0.1:19840:1984"
+      # RTSP cannot pass through nginx's http block — publish directly.
+      # Use "8554:8554" if the classic port is free on the host.
+      - "18554:8554"
+    volumes:
+      - honeypot_data:/data
+    environment:
+      - TZ=UTC
+    command:
+      - "--trust-proxy"
+    read_only: true
+    user: "65534:65534"
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  honeypot_data:

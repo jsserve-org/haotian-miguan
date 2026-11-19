@@ -33,3 +33,26 @@ jobs:
           RC=$?
           kill $POT 2>/dev/null || true
           exit $RC
+
+      - name: Trust-proxy evidence check (behind-nginx mode)
+        run: |
+          python3 honeypot.py --port 19842 --rtsp-port 0 --data-dir /tmp/smoke-tp --quiet --no-color --trust-proxy &
+          POT=$!
+          for i in $(seq 1 20); do
+            curl -sf http://127.0.0.1:19842/api > /dev/null && break
+            sleep 0.5
+          done
+          # attacker reaches the pot through "their nginx": X-Real-IP set,
+          # plus a client-spoofed XFF chain whose rightmost hop is real
+          curl -s -o /dev/null \
+            -H 'X-Real-IP: 203.0.113.66' \
+            -H 'X-Forwarded-For: 6.6.6.6, 203.0.113.66' \
+            http://127.0.0.1:19842/api/config
+          GOT=$(python3 -c "import json;a=json.loads(open('/tmp/smoke-tp/alerts.jsonl').readlines()[-1]);print(a['ip'],a['peer'])")
+          echo "evidence ip/peer -> $GOT"
+          test "$GOT" = "203.0.113.66 127.0.0.1"
+          # invalid X-Real-IP must fall back to the direct peer
+          curl -s -o /dev/null -H 'X-Real-IP: definitely-not-an-ip' http://127.0.0.1:19842/api/config
+          GOT2=$(python3 -c "import json;a=json.loads(open('/tmp/smoke-tp/alerts.jsonl').readlines()[-1]);print(a['ip'])")
+          test "$GOT2" = "127.0.0.1"
+          kill $POT 2>/dev/null || true

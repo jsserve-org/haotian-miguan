@@ -1,6 +1,12 @@
+# 好甜的蜜罐 — direct deployment (image from GitHub Packages)
+#   docker compose up -d
+#   docker compose pull && docker compose up -d   # upgrade to the latest build
+#
+# Behind your own nginx reverse proxy? Use docker-compose.proxy.yml instead.
+
 services:
   haotian-miguan:
-    build: .
+    image: ghcr.io/jsserve-org/haotian-miguan:latest
     container_name: haotian-miguan
     restart: unless-stopped
     ports:

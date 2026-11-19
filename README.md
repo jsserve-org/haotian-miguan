@@ -98,12 +98,19 @@ python3 honeypot.py                      # HTTP :1984 + RTSP :8554, logs to ./da
 python3 honeypot.py --webhook https://discord.com/api/webhooks/…   # alert push
 ```
 
-**Docker Compose (hardened: read-only fs, no caps, non-root):**
+**Docker Compose (image from GitHub Packages, hardened: read-only fs, no caps, non-root):**
 
 ```bash
-docker compose up -d --build
+docker compose up -d                    # pulls ghcr.io/jsserve-org/haotian-miguan:latest
 docker compose logs -f                  # watch the pot fill up
 ```
+
+Variants:
+
+- `docker-compose.proxy.yml` — run it **behind your own nginx** (shifted host
+  ports `19840`/`18554`, HTTP bound to the docker bridge IP only, and
+  `--trust-proxy` so evidence records the attacker's real IP)
+- `docker-compose.build.yml` — build from source instead of pulling GHCR
 
 **Verify the illusion** (safe — it's all fake):
 
@@ -127,8 +134,76 @@ python3 report.py --json                # for shipping elsewhere
 --data-dir ./data       evidence + state dir       --max-body-mb 8    request body cap
 --version-string 1.8.5  version to advertise      --config-path-label /config/go2rtc.yaml
 --config-file FILE      seed the fake go2rtc.yaml  --reset            wipe fake state
+--trust-proxy           behind your nginx: evidence IP from X-Real-IP / rightmost XFF hop
 --quiet                 only alerts on console     --no-color         plain console
 ```
+
+### Behind your reverse proxy (nginx)
+
+If traffic reaches the pot through **your own nginx** (e.g. the classic
+`proxy_pass http://172.17.0.1:1984` setup), two things change:
+
+1. Use `docker-compose.proxy.yml` — it binds HTTP to the docker bridge IP
+   only (`172.17.0.1:19840`) and adds `--trust-proxy`, so evidence, alerts
+   and fail2ban see the attacker's real IP from `X-Real-IP` instead of
+   your proxy's address (the direct peer is kept in the `peer` field).
+2. **Do not copy the protection blocks from your real instance's vhost.**
+   On a hardened go2rtc you block `/api/config`, `/api/restart` and
+   redirect `/editor.html` away — on the *decoy* those endpoints are the
+   entire point and must stay reachable:
+
+```nginx
+map $http_upgrade $connection_upgrade {
+    default upgrade;
+    ''      close;
+}
+
+server {
+    # optional: also catch bare-IP / unmatched-Host scanners — but only
+    # one server may be default per listen port; give your REAL vhost an
+    # explicit server_name if you promote this one to default.
+    listen 80;                      # or: listen 80 default_server;
+    server_name cam.example.com;    # the decoy's hostname
+
+    client_max_body_size 16m;       # let beefy malicious configs reach the pot
+
+    location / {
+        proxy_pass http://172.17.0.1:19840;
+        proxy_http_version 1.1;
+
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;                     # evidence IP
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # WebSocket support (the decoy has none — harmless, keeps parity
+        # with your real vhost's fingerprint)
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+
+        # Streaming (the fake MJPEG actually streams)
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
+        proxy_buffering off;
+        proxy_cache off;
+    }
+
+    # NOTE: deliberately NO `location = /api/config { return 200 "no thank you"; }`
+    # and NO /editor.html redirects here. The trap must stay open.
+}
+```
+
+Notes:
+
+- nginx's `http` block cannot proxy RTSP. The compose variant publishes
+  RTSP directly on host port `18554` (scanners still find it); switch to
+  `8554:8554` if the classic port is free. A `stream {}` TCP passthrough
+  is possible but usually not worth it for a decoy.
+- With `--trust-proxy` on, don't leave the pot's HTTP port directly
+  internet-reachable (a direct hit could forge `X-Real-IP`); the proxy
+  compose binds it to `172.17.0.1` only for exactly that reason.
+- fail2ban still works: `alerts.log` carries the attacker's real IP, so
+  bans hit the source, not your proxy.
 
 ### Deploying it for real
 

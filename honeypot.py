@@ -46,7 +46,7 @@ Requires Python 3.9+, no third-party packages.
 import argparse
 import base64
 import collections
-import hashlib
+import ipaddress
 import json
 import os
 import queue
@@ -61,7 +61,6 @@ import time
 import urllib.parse
 import urllib.request
 import uuid
-import zlib
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -71,7 +70,6 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 GO2RTC_VERSION = "1.8.5"          # the version we pretend to run (old & juicy)
 GO2RTC_ARCH = "linux/amd64"
-GO2RTC_USER_AGENT = "go2rtc/" + GO2RTC_VERSION
 RTSP_PUBLIC_METHODS = "OPTIONS, DESCRIBE, SETUP, TEARDOWN, PLAY, PAUSE, ANNOUNCE, RECORD"
 
 # producer schemes registered in real go2rtc v1.8.5 (streams.handlers registry)
@@ -1807,6 +1805,26 @@ class Handler(BaseHTTPRequestHandler):
     def address_string(self):
         return self.client_address[0]
 
+    def _client_ip(self, peer):
+        """Evidence IP. With --trust-proxy (the pot sits behind the
+        operator's own nginx) the attacker address comes from the proxy:
+        X-Real-IP first, else the rightmost X-Forwarded-For hop — the hop
+        OUR proxy appended, not something the client can spoof into first
+        position. Otherwise the direct peer is the truth."""
+        if ARGS.trust_proxy:
+            cand = (self.headers.get("X-Real-IP") or "").strip()
+            if not cand:
+                xff = (self.headers.get("X-Forwarded-For") or "").strip()
+                if xff:
+                    cand = xff.split(",")[-1].strip()
+            if cand:
+                try:
+                    ipaddress.ip_address(cand)
+                    return cand
+                except ValueError:
+                    pass
+        return peer
+
     # -- request body ------------------------------------------------------
     def _read_body(self):
         te = (self.headers.get("Transfer-Encoding") or "").lower()
@@ -1889,7 +1907,8 @@ class Handler(BaseHTTPRequestHandler):
     # -- main dispatch -------------------------------------------------------
     def _handle(self):
         t0 = time.perf_counter()
-        ip, port = self.client_address[0], self.client_address[1]
+        peer, port = self.client_address[0], self.client_address[1]
+        ip = self._client_ip(peer)
         raw = self.path
         split = urllib.parse.urlsplit(raw)
         path = urllib.parse.unquote(split.path) or "/"
@@ -1909,6 +1928,7 @@ class Handler(BaseHTTPRequestHandler):
         rid = short_id()
         rec = {
             "id": rid, "ts": utcnow_iso(), "kind": "http", "ip": ip, "port": port,
+            "peer": peer if peer != ip else None,
             "method": method, "path": path,
             "query": query if query else None,
             "ua": self.headers.get("User-Agent"),
@@ -2452,6 +2472,10 @@ def parse_args():
                    help="POST each alert as JSON to this URL (Discord/Slack/relay)")
     p.add_argument("--max-body-mb", type=int, default=8, help="request body cap in MiB")
     p.add_argument("--reset", action="store_true", help="reset fake state before start")
+    p.add_argument("--trust-proxy", action="store_true",
+                   help="we sit behind YOUR reverse proxy (nginx): evidence IPs "
+                        "come from X-Real-IP / rightmost X-Forwarded-For hop "
+                        "instead of the proxy's address")
     p.add_argument("--quiet", action="store_true", help="no per-request console lines")
     p.add_argument("--no-color", action="store_true", help="disable ANSI colors")
     return p.parse_args()

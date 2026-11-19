@@ -1,0 +1,25 @@
+# 好甜的蜜罐 — build from source instead of pulling the GHCR image
+#   docker compose -f docker-compose.build.yml up -d --build
+
+services:
+  haotian-miguan:
+    build: .
+    image: haotian-miguan:local
+    container_name: haotian-miguan
+    restart: unless-stopped
+    ports:
+      - "1984:1984"
+      - "8554:8554"
+    volumes:
+      - honeypot_data:/data
+    environment:
+      - TZ=UTC
+    read_only: true
+    user: "65534:65534"
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  honeypot_data:
