@@ -1287,6 +1287,12 @@ INDEX_HTML = r"""<!DOCTYPE html>
         });
     });
 
+    function esc(s) {
+        return String(s).replace(/[&<>"']/g, c => (
+            {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]
+        ));
+    }
+
     function reload() {
         const url = new URL('api/streams', location.href);
         fetch(url, {cache: 'no-cache'}).then(r => r.json()).then(data => {
@@ -1302,8 +1308,8 @@ INDEX_HTML = r"""<!DOCTYPE html>
                 const tr = document.createElement('tr');
                 tr.dataset['id'] = name;
                 tr.innerHTML =
-                    `<td><label><input type="checkbox" name="${name}">${name}</label></td>` +
-                    `<td><a href="api/streams?src=${src}">${online} / info</a></td>` +
+                    `<td><label><input type="checkbox" name="${esc(name)}">${esc(name)}</label></td>` +
+                    `<td><a href="api/streams?src=${src}">${esc(online)} / info</a></td>` +
                     `<td>${links}</td>`;
                 tbody.appendChild(tr);
             }
