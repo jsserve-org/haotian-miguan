@@ -197,6 +197,11 @@ is secretly the pot. Viewers watch real cameras; anyone who opens
 - `/api/exit` kills only the illusion (the connection drops), never your
   real process — which is a fix, because an unpatched real go2rtc can be
   exited remotely by anyone
+- **the pot never serves its own UI in hybrid mode**: every page and asset
+  (`/`, `/add.html`, `/main.js`, …) is relayed to the real instance, so even
+  if nginx routes a page to the pot the bytes are the real version's — a
+  trimmed old-era page sitting next to a 1.9.x `/api` would betray the
+  decoy instantly
 
 Run it:
 

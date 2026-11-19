@@ -161,5 +161,10 @@ jobs:
           curl -s -o /dev/null -X DELETE http://127.0.0.1:19844/api/streams?src=front_door
           ! curl -s http://127.0.0.1:19844/api/streams | grep -q '"front_door"'
           curl -s http://127.0.0.1:19843/api/streams | grep -q '"front_door"'
+          # pages are relayed to the real instance, never the pot's own UI
+          diff <(curl -s http://127.0.0.1:19843/add.html) \
+               <(curl -s http://127.0.0.1:19844/add.html) >/dev/null
+          diff <(curl -s http://127.0.0.1:19843/main.js) \
+               <(curl -s http://127.0.0.1:19844/main.js) >/dev/null
           set +e
           kill $POT $REAL 2>/dev/null || true

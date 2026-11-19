@@ -2473,6 +2473,14 @@ class Handler(BaseHTTPRequestHandler):
 
         # static UI (Go http.FileServer flavor)
         if method in ("GET", "HEAD") and path in STATIC_FILES:
+            if ARGS.upstream:
+                # HYBRID: the real instance owns the whole UI. Relay every
+                # page/asset upstream instead of serving our own old-era
+                # pages — so no matter what nginx routes here, /add.html,
+                # /index.html, /main.js… are byte-identical to the real
+                # one (a trimmed 1.8.x page next to a 1.9.x /api would
+                # betray the decoy instantly).
+                return self.passthrough()
             ctype, text = STATIC_FILES[path]
             self.respond(200, text.encode("utf-8"), ctype,
                          extra={"Accept-Ranges": "bytes"})
