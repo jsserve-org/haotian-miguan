@@ -121,6 +121,31 @@ jobs:
           ! curl -s -H 'Sec-Fetch-Site: same-origin' http://127.0.0.1:19866/api/streams | grep -q ui_pwn
           kill $POT $REAL 2>/dev/null || true
 
+      - name: Config sync (real config changes propagate, no phantom rows)
+        run: |
+          printf 'streams:\n  keepme: rtsp://admin:x@10.0.0.1/x\n  ghost: rtsp://admin:y@10.0.0.2/x\n' > /tmp/sync.yaml
+          python3 honeypot.py --port 19867 --rtsp-port 0 --config-file /tmp/sync.yaml \
+            --data-dir /tmp/sync-a --quiet --no-color &
+          REAL=$!
+          for i in $(seq 1 20); do curl -sf http://127.0.0.1:19867/api >/dev/null && break; sleep 0.5; done
+          python3 honeypot.py --port 19868 --rtsp-port 0 --upstream http://127.0.0.1:19867 \
+            --data-dir /tmp/sync-b --quiet --no-color --config-sync 2 &
+          POT=$!
+          for i in $(seq 1 20); do curl -sf http://127.0.0.1:19868/api >/dev/null && break; sleep 0.5; done
+          sleep 1
+          curl -s http://127.0.0.1:19868/api/streams | grep -q ghost
+          # operator removes the stream on the real instance
+          printf 'streams:\n  keepme: rtsp://admin:x@10.0.0.1/x\n' > /tmp/sync2.yaml
+          curl -s -o /dev/null -X POST --data-binary @/tmp/sync2.yaml http://127.0.0.1:19867/api/config
+          curl -s -o /dev/null -X POST http://127.0.0.1:19867/api/restart
+          # the pot's listing follows the live truth at once (no phantom rows)
+          ! curl -s http://127.0.0.1:19868/api/streams | grep -q ghost
+          # and the fake config text catches up within one sync window
+          sleep 2.5
+          curl -s http://127.0.0.1:19868/api/config | grep -q keepme
+          ! curl -s http://127.0.0.1:19868/api/config | grep -q ghost
+          kill $POT $REAL 2>/dev/null || true
+
       - name: Hybrid mode (real instance + honeypot seam)
         run: |
           # A stands in for the user's real go2rtc; B is the hybrid pot

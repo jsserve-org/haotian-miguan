@@ -83,6 +83,10 @@ services:
       - "7c05066"                  # your real build revision (auto-adopted too)
       - "--hide-planted-from-ui"   # your own WebUI shows the REAL list; only
                                    # scripted clients see planted streams
+      - "--config-sync"
+      - "300"                      # re-mirror the real config every 5 min
+                                   # (0 = never; attacker configs get one
+                                   #  window of grace, then revert)
     read_only: true
     user: "65534:65534"
     cap_drop:

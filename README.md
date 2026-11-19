@@ -354,9 +354,18 @@ Notes:
 - Your REAL instance should keep `api.listen` private (LAN/localhost) —
   nginx is its only public path; the pot is the only thing that answers
   the dangerous endpoints.
-- Auto-seed runs at boot (and retries once a minute if the real instance
-  was restarting). Added cameras? Pull your evidence, then reseed:
-  `docker exec haotian-miguan rm /data/state.json && docker restart haotian-miguan`
+- **The fake instance stays in sync.** The pot mirrors the real
+  `go2rtc.yaml` (secrets scrubbed) and re-reads it every `--config-sync`
+  seconds (default 300). Streams added, renamed or removed on the real box
+  appear/disappear in the pot's config and listing within that window — no
+  stale or phantom rows, nothing invented. If an instance was still
+  restarting at boot, the first sync fills it in.
+- **An attacker's applied config gets one window of grace**, then reverts:
+  they see their stream and their payload immediately (the illusion), and
+  the pot quietly returns to the real config afterwards — like an operator
+  who noticed. Their payload stays in `alerts.jsonl` / `drops/` as
+  evidence either way. Set `--config-sync 0` to keep attacker configs
+  forever instead.
 - A `planted_view` alert (severity: high) fires the moment someone
   consumes a stream they planted — on a real go2rtc that is the instant
   their reverse shell would have spawned. That is your paging-worthy

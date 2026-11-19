@@ -402,6 +402,8 @@ class FakeState:
         self.upstream_version = None   # real instance version (fake log lines)
         self.upstream_revision = None  # real instance git revision (1.9.x)
         self._reseed_ts = 0.0          # lazy autoseed retry cooldown
+        self._last_sync = 0.0          # last real-config mirror
+        self._attacker_ts = 0.0        # last attacker write to the fake state
         self.load()
 
     # -- persistence ------------------------------------------------------
@@ -515,41 +517,51 @@ class FakeState:
 
     # -- config file API ----------------------------------------------------
     def config_text(self):
-        self._maybe_reseed()
+        self._maybe_sync()
         with self.lock:
             if self.raw is not None:
                 return self.raw          # byte-for-byte what was "written"
             return render_config(self.pre, self.config_streams, self.post)
 
-    def _maybe_reseed(self):
-        """Lazy retry of the upstream auto-seed (max once a minute). Covers
-        a real instance that was still starting when the pot booted; only
-        adopts while no attacker has shaped the fake config yet."""
-        if not ARGS.upstream or self.sanitized_streams:
+    def _maybe_sync(self):
+        """Keep the fake state in step with the REAL instance.
+
+        - nothing mirrored yet → adopt the real config now
+        - otherwise re-mirror every --config-sync seconds
+        - after an attacker write, leave their story alone for one sync
+          window (so their apply/restart/verify flow looks real), then
+          revert to the real config like an operator who noticed
+        """
+        if not ARGS.upstream or ARGS.config_sync <= 0:
             return
         now = time.time()
-        if now - self._reseed_ts < 60:
+        if self._last_sync == 0.0 and self.sanitized_streams:
+            self._last_sync = now      # boot mirror already happened
             return
-        self._reseed_ts = now
+        if now - self._last_sync < ARGS.config_sync:
+            return
+        self._last_sync = now
         with self.lock:
-            if self.raw is not None or self.meta:
-                return  # an attacker already wrote their story — keep it
+            if self._attacker_ts and now - self._attacker_ts < ARGS.config_sync:
+                return                 # still inside the attacker's grace window
             try:
                 self._autoseed()
             except Exception:
                 return
-            if self.sanitized_streams:
-                self.config_streams = [list(x) for x in self.sanitized_streams]
-                self.runtime_streams = [list(x) for x in self.sanitized_streams]
-                self.save()
-                CON.print("    hybrid: reseeded %d streams from upstream"
-                          % len(self.sanitized_streams))
+            # the real config is authoritative again: drop attacker edits from
+            # the fake state (their payload stays in alerts/drops as evidence)
+            self.runtime_streams = [list(x) for x in self.config_streams]
+            self.deleted_names = set()
+            self.save()
+            CON.print("    hybrid: re-synced with the real config (%d streams)"
+                      % len(self.sanitized_streams))
 
     def apply_config(self, text, ip):
         """POST /api/config — full document replace (real v1.8.5 writes the
         file verbatim; runtime streams only change after /api/restart)."""
         added = []
         with self.lock:
+            self._attacker_ts = time.time()
             self.raw = text if text.endswith("\n") else (text + "\n" if text.strip() else text)
             if not text.strip():
                 # empty body: real v1.8.5 happily truncates the file to zero
@@ -581,6 +593,7 @@ class FakeState:
         pre, streams, post = split_config_text(text)
         added = []
         with self.lock:
+            self._attacker_ts = time.time()
             self.raw = None
             if streams is not None:
                 old_names = {n for n, _ in self.config_streams}
@@ -611,6 +624,7 @@ class FakeState:
     def put_stream(self, name, srcs, ip, persist=True):
         """PUT /api/streams — runtime create + PatchConfig into the file."""
         with self.lock:
+            self._attacker_ts = time.time()
             self.raw = None    # PatchConfig re-renders the file
             old_names = {n for n, _ in self.runtime_streams}
             self.runtime_streams = [[n, s] for n, s in self.runtime_streams if n != name]
@@ -629,6 +643,7 @@ class FakeState:
         state; a REAL (upstream) stream only vanishes from our merged view —
         the real instance itself is never touched."""
         with self.lock:
+            self._attacker_ts = time.time()
             self.raw = None    # PatchConfig re-renders the file
             if name in dict(self.sanitized_streams):
                 # deleting an upstream stream: hide it locally, stay intact upstream
@@ -652,28 +667,33 @@ class FakeState:
         """Hybrid /api/streams listing: the REAL streams (with credentials
         replaced) plus whatever the attacker planted, minus what they
         'deleted'. Falls back to seed+planted if the upstream is down."""
-        self._maybe_reseed()
+        self._maybe_sync()
         base = {}
+        live = False
         if ARGS.upstream:
             try:
                 st, ct, body = upstream_fetch("GET", "/api/streams")
                 data = json.loads(body)
                 if isinstance(data, dict):
-                    base = data
+                    # the LIVE real list is the truth — scrub creds, never
+                    # re-add a name the real instance no longer has
+                    base = scrub_json_creds(data)
+                    live = True
             except UpstreamError:
                 pass
         seed_map = dict(self.sanitized_streams)
         for n in self.deleted_names:
             base.pop(n, None)
-        for n, s in seed_map.items():
-            if n in self.deleted_names:
-                continue
-            base[n] = {"producers": [{"url": x} for x in s], "consumers": None}
+        if not live and seed_map:
+            # upstream unreachable: degrade to the last known (sanitized) list
+            for n, s in seed_map.items():
+                if n not in self.deleted_names:
+                    base[n] = {"producers": [{"url": x} for x in s], "consumers": None}
         for n, s in self.runtime_streams:
-            # overlay the attacker's view of a stream: their new streams, or
-            # their modified version of an existing one — never the default
-            # bait (that would betray the pot if seeding never succeeded)
-            if n in self.meta or (seed_map and seed_map.get(n) != s):
+            # overlay only what the attacker changed or planted: their new
+            # streams, or their modified version of a real one. Never the
+            # cached seed — that is what made phantom rows appear.
+            if n in self.meta or (seed_map.get(n) is not None and seed_map.get(n) != s):
                 base[n] = {"producers": [{"url": x} for x in s], "consumers": None}
         return base
 
@@ -3016,6 +3036,12 @@ def parse_args():
                         "the REAL stream list untouched, so the operator's UI "
                         "stays clean; scripted clients still see planted "
                         "streams (the attacker's verification)")
+    p.add_argument("--config-sync", type=int, default=300, metavar="SECONDS",
+                   help="hybrid mode: re-mirror the real go2rtc.yaml every N "
+                        "seconds so the fake instance stays in sync (streams "
+                        "added/removed on the real box appear/disappear). An "
+                        "attacker's applied config gets one window of grace "
+                        "before it reverts. 0 disables (default: 300)")
     p.add_argument("--config-path-label", default="/config/go2rtc.yaml",
                    help="config path shown in GET /api (fiction, never read)")
     p.add_argument("--config-file", default=None,
