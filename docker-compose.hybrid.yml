@@ -99,6 +99,13 @@ services:
       - "127.0.0.1:8080:8080"      # never expose this beyond localhost
     volumes:
       - honeypot_data:/data
+    # the image healthcheck probes the pot's port — give this service its own
+    healthcheck:
+      test: ["CMD", "python3", "-c",
+             "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8080/',timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
     read_only: true
     user: "65534:65534"
     cap_drop:
