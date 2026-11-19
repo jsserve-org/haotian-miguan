@@ -81,6 +81,8 @@ services:
       - "1.9.15"                   # match your real instance (auto-adopted when reachable)
       - "--revision"
       - "7c05066"                  # your real build revision (auto-adopted too)
+      - "--hide-planted-from-ui"   # your own WebUI shows the REAL list; only
+                                   # scripted clients see planted streams
     read_only: true
     user: "65534:65534"
     cap_drop:

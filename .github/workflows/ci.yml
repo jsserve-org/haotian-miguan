@@ -83,6 +83,44 @@ jobs:
           curl -s http://127.0.0.1:19851/data.json | grep -q dash_pwn
           kill $POT $DASH 2>/dev/null || true
 
+      - name: Config mirroring (fake config = the real one, secrets scrubbed)
+        run: |
+          printf 'api:\n  listen: ":1984"\n  username: admin\n  password: CI_REAL_SECRET\nstreams:\n  cam1: rtsp://admin:CI_CAM_SECRET@10.0.0.1/x\n' > /tmp/real.yaml
+          python3 honeypot.py --port 19863 --rtsp-port 0 --config-file /tmp/real.yaml \
+            --data-dir /tmp/mir-a --quiet --no-color &
+          REAL=$!
+          for i in $(seq 1 20); do curl -sf http://127.0.0.1:19863/api >/dev/null && break; sleep 0.5; done
+          python3 honeypot.py --port 19864 --rtsp-port 0 --upstream http://127.0.0.1:19863 \
+            --data-dir /tmp/mir-b --quiet --no-color &
+          POT=$!
+          for i in $(seq 1 20); do curl -sf http://127.0.0.1:19864/api >/dev/null && break; sleep 0.5; done
+          sleep 1
+          CFG=$(curl -s http://127.0.0.1:19864/api/config)
+          echo "$CFG"
+          echo "$CFG" | grep -q "password: Restream2026"     # secret key scrubbed
+          echo "$CFG" | grep -q "username: admin"            # structure kept
+          echo "$CFG" | grep -q cam1
+          ! echo "$CFG" | grep -q CI_REAL_SECRET
+          ! echo "$CFG" | grep -q CI_CAM_SECRET
+          kill $POT $REAL 2>/dev/null || true
+
+      - name: UI-clean listing (operator's browser sees the real list)
+        run: |
+          python3 honeypot.py --port 19865 --rtsp-port 0 --data-dir /tmp/ui-a --quiet --no-color &
+          REAL=$!
+          for i in $(seq 1 20); do curl -sf http://127.0.0.1:19865/api >/dev/null && break; sleep 0.5; done
+          python3 honeypot.py --port 19866 --rtsp-port 0 --upstream http://127.0.0.1:19865 \
+            --data-dir /tmp/ui-b --quiet --no-color --hide-planted-from-ui &
+          POT=$!
+          for i in $(seq 1 20); do curl -sf http://127.0.0.1:19866/api >/dev/null && break; sleep 0.5; done
+          sleep 1
+          curl -s -o /dev/null -X POST --data-binary \
+            $'streams:\n  ui_pwn: ffmpeg:rtsp://x#command=id\n' http://127.0.0.1:19866/api/config
+          curl -s -o /dev/null -X POST http://127.0.0.1:19866/api/restart
+          curl -s http://127.0.0.1:19866/api/streams | grep -q ui_pwn          # scripted: visible
+          ! curl -s -H 'Sec-Fetch-Site: same-origin' http://127.0.0.1:19866/api/streams | grep -q ui_pwn
+          kill $POT $REAL 2>/dev/null || true
+
       - name: Hybrid mode (real instance + honeypot seam)
         run: |
           # A stands in for the user's real go2rtc; B is the hybrid pot

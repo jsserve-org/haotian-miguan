@@ -321,6 +321,9 @@ def merge_config_sections(old, new):
 # ---------------------------------------------------------------------------
 
 CRED_URL_RE = re.compile(r"(?i)([a-z][a-z0-9+.-]*://)([^/@?\s]*):([^/@?\s]*)@")
+SECRET_KEY_RE = re.compile(
+    r"(?i)^(\s*)(password|passwd|pass|pwd|secret|token|api[-_]?key|apikey|"
+    r"access[-_]?key|private[-_]?key|credential|credentials)\s*:\s*(\S.*?)\s*$")
 
 
 def sanitize_creds(url):
@@ -328,6 +331,22 @@ def sanitize_creds(url):
     pot reflects or relays REAL source URLs, so the decoy never leaks the
     real camera credentials it observed in the upstream stream list."""
     return CRED_URL_RE.sub(lambda m: "%s%s:Restream2026@" % (m.group(1), m.group(2) or "admin"), url)
+
+
+def sanitize_config_text(text):
+    """Make a REAL go2rtc.yaml safe to expose as the fake one: every URL
+    userinfo password and every secret-ish key (password, token, api_key…)
+    is replaced, everything else — sections, values, comments, order — is
+    kept byte-for-byte so the fake config is indistinguishable from the
+    genuine article."""
+    out = []
+    for line in text.splitlines():
+        if not line.lstrip().startswith("#"):
+            m = SECRET_KEY_RE.match(line)
+            if m:
+                line = "%s%s: Restream2026" % (m.group(1), m.group(2))
+        out.append(sanitize_creds(line))
+    return "\n".join(out) + ("\n" if text.endswith("\n") or text else "")
 
 
 def scrub_json_creds(obj):
@@ -415,9 +434,9 @@ class FakeState:
 
     def _autoseed(self):
         """Hybrid mode: mirror the REAL instance so the decoy is seamless.
-        Adopt its version for the fake log lines and build the fake
-        go2rtc.yaml from its stream list — with credentials replaced, so
-        attackers can never harvest real camera passwords from the pot."""
+        Adopt its version/revision for the fake log lines, then copy its
+        go2rtc.yaml — secrets replaced — as the fake config. Falls back to
+        building a config from its stream list if /api/config is unreadable."""
         try:
             st, ct, body = upstream_fetch("GET", "/api")
             info = json.loads(body)
@@ -428,30 +447,50 @@ class FakeState:
         except Exception as e:
             CON.warn("upstream unreachable, fake logs keep version %s (%s)"
                      % (ARGS.version_string, e))
+        # 1st choice: mirror the real go2rtc.yaml itself (secrets scrubbed)
+        mirrored = False
         try:
-            st, ct, body = upstream_fetch("GET", "/api/streams")
-            data = json.loads(body)
-            seeded = []
-            if isinstance(data, dict) and data:
-                for name, info in data.items():
-                    srcs = []
-                    if isinstance(info, dict):
-                        for p in (info.get("producers") or []):
-                            u = p.get("url") if isinstance(p, dict) else None
-                            if isinstance(u, str) and u:
-                                srcs.append(sanitize_creds(u))
-                    if not srcs:
-                        srcs = ["rtsp://admin:Restream2026@192.168.1.50:554/stream"]
-                    seeded.append([name, srcs])
-            if seeded:
-                seeded.sort(key=lambda x: x[0])
-                _pre, _old, _post = split_config_text(DEFAULT_CONFIG)
-                self.pre, self.config_streams, self.post = _pre, seeded, _post
-                self.sanitized_streams = [list(x) for x in seeded]
-                CON.print("    hybrid: seeded %d real streams (creds sanitized)"
-                          % len(seeded))
+            st, ct, body = upstream_fetch("GET", "/api/config")
+            real_cfg = body.decode("utf-8", "replace")
+            if real_cfg.strip():
+                fake = sanitize_config_text(real_cfg)
+                pre, streams, post = split_config_text(fake)
+                self.pre, self.post = pre, post
+                self.raw = fake                       # GET returns this verbatim
+                self.config_streams = streams or []
+                self.sanitized_streams = [list(x) for x in (streams or [])]
+                mirrored = True
+                CON.print("    hybrid: mirrored the real go2rtc.yaml "
+                          "(%d streams, secrets sanitized)" % len(self.sanitized_streams))
         except Exception as e:
-            CON.warn("hybrid: could not seed from upstream (%s) — using default bait" % e)
+            CON.warn("hybrid: could not mirror the real config (%s)" % e)
+
+        # fallback: build a config from the real stream list
+        if not mirrored:
+            try:
+                st, ct, body = upstream_fetch("GET", "/api/streams")
+                data = json.loads(body)
+                seeded = []
+                if isinstance(data, dict) and data:
+                    for name, info in data.items():
+                        srcs = []
+                        if isinstance(info, dict):
+                            for p in (info.get("producers") or []):
+                                u = p.get("url") if isinstance(p, dict) else None
+                                if isinstance(u, str) and u:
+                                    srcs.append(sanitize_creds(u))
+                        if not srcs:
+                            srcs = ["rtsp://admin:Restream2026@192.168.1.50:554/stream"]
+                        seeded.append([name, srcs])
+                if seeded:
+                    seeded.sort(key=lambda x: x[0])
+                    _pre, _old, _post = split_config_text(DEFAULT_CONFIG)
+                    self.pre, self.config_streams, self.post = _pre, seeded, _post
+                    self.sanitized_streams = [list(x) for x in seeded]
+                    CON.print("    hybrid: seeded %d real streams (creds sanitized)"
+                              % len(seeded))
+            except Exception as e:
+                CON.warn("hybrid: could not seed from upstream (%s) — using default bait" % e)
 
     def save(self):
         try:
@@ -2244,6 +2283,14 @@ class Handler(BaseHTTPRequestHandler):
                 and name not in STATE.deleted_names
                 and not STATE.is_planted(name))
 
+    def _is_ui_client(self):
+        """True when this looks like the go2rtc WebUI loading in a browser
+        (the real `fetch('api/streams')` carries Sec-Fetch-* headers and a
+        Referer; curl/python exploits do not)."""
+        return bool(self.headers.get("Sec-Fetch-Site")
+                    or self.headers.get("Sec-Fetch-Mode")
+                    or self.headers.get("Referer"))
+
     def passthrough(self, body=None):
         """Relay this request to the real go2rtc and stream the response
         back. Used in hybrid mode for anything that doesn't involve an
@@ -2496,6 +2543,18 @@ class Handler(BaseHTTPRequestHandler):
             name = (q.get("name") or [""])[0]
             if src == "" and method != "POST":
                 if ARGS.upstream:
+                    if ARGS.hide_planted_from_ui and self._is_ui_client():
+                        # A browser rendering OUR WebUI: show the REAL list,
+                        # untouched — the operator's UI stays clean and the
+                        # pot's planted rows never leak into it. Scripted
+                        # clients (curl/python exploits) still get the merged
+                        # view, so the attacker still sees what they planted.
+                        try:
+                            st, ct, up_body = upstream_fetch("GET", "/api/streams")
+                            self.go_json(scrub_json_creds(json.loads(up_body)), status=st)
+                            return st
+                        except Exception:
+                            pass   # fall through to the merged view
                     # hybrid: live merge of the real streams + planted ones
                     self.go_json(STATE.merged_streams_json())
                 else:
@@ -2944,6 +3003,11 @@ def parse_args():
     p.add_argument("--revision", default="",
                    help="git revision advertised in /api (1.9.x builds show "
                         "one; hybrid mode adopts the real instance's revision)")
+    p.add_argument("--hide-planted-from-ui", action="store_true",
+                   help="hybrid mode: a browser loading the real WebUI gets "
+                        "the REAL stream list untouched, so the operator's UI "
+                        "stays clean; scripted clients still see planted "
+                        "streams (the attacker's verification)")
     p.add_argument("--config-path-label", default="/config/go2rtc.yaml",
                    help="config path shown in GET /api (fiction, never read)")
     p.add_argument("--config-file", default=None,
