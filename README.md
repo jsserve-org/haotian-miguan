@@ -235,18 +235,33 @@ server {
 }
 ```
 
-Who sees what:
+Who sees what (endpoint names are go2rtc's own — note `.mjpeg`, not
+`.mjpg`; go2rtc has never had a `.mjpg` route):
 
 | Request | Served by | Result |
 |---|---|---|
-| `/`, `/links.html`, `/stream.html`, media for real streams | real go2rtc | your cameras, as always |
-| `GET /api` | real go2rtc | real version/host/rtsp |
+| `/`, UI pages, `/api`, `/api/ws` | real go2rtc, direct | your UI and live WebUI playback exactly as today |
 | `GET /api/streams` | pot | merged: real streams (creds scrubbed) + planted |
 | `GET /api/config` | pot | juicy fake config, real stream names, fake passwords |
 | `POST /api/config` + `/api/restart` | pot | "applied"; their stream appears, logs say so |
 | `PUT/PATCH/DELETE /api/streams` | pot | planting logged; real config untouched |
-| `/api/frame.jpeg?src=<planted>` | pot | fake frame — the RCE trigger moment (high alert) |
+| media (`frame.jpeg`, `stream.mjpeg`, `stream.mp4`, `frame.mp4`, `stream.m3u8`) + `/api/webrtc` for a REAL stream | pot → relayed upstream | the same bytes as before, one local hop, JSON creds scrubbed |
+| media + `/api/webrtc` for a PLANTED stream | pot | fake frame — the RCE trigger moment (high alert) |
 | `/api/log`, `/api/exit` | pot | fake logs; exit kills the connection, not the process |
+
+Why do media endpoints route through the pot at all? Because the
+attacker's RCE trigger **is** a media request: `/api/frame.jpeg?src=<their
+planted stream>` is how you make a real go2rtc spawn their
+`ffmpeg:…#command=`. If that request hit the real instance it would 404
+and the illusion would break at its climax. Routing media through the
+pot costs real viewers one extra local hop and buys the whole trap.
+The paths in the nginx regex are exactly the media/signaling routes
+go2rtc v1.8.5 advertises on its own `links.html` page, so nothing an
+attacker expects is missing. HLS segments for real streams keep working
+too: the passthrough playlist carries the real segment URLs, which fall
+through to `location /` → real instance. `/api/ws` — what the real WebUI
+(and the Home Assistant card) actually plays through — stays direct on
+the real instance and never touches the pot.
 
 Notes:
 
