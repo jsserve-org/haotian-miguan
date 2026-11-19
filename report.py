@@ -147,9 +147,10 @@ def main():
             W("     %-20s by %-15s %s via %s\n" % (
                 name, m.get("ip", "?"), m.get("ts", ""), m.get("via", "")))
         srcs = {n: s for n, s in (state.get("config_streams") or [])}
-        for name in planted:
-            if name in srcs:
-                W("         source: %s\n" % one_line(", ".join(srcs[name]), 100))
+        for name, m in planted.items():
+            src = m.get("sources") or srcs.get(name, [])
+            if src:
+                W("         source: %s\n" % one_line(", ".join(src), 100))
         W("\n")
 
     if top_payloads:

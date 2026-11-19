@@ -6,8 +6,12 @@
 # while nginx routes the attacker surface to this pot:
 #
 #     /api/config  /api/restart  /api/exit  /api/log
-#     /api/streams (mutations + merged listing)   /editor.html
-#     /add.html  /log.html  /api/webrtc
+#     /api/streams (mutations + merged listing)   /api/webrtc
+#
+# UI pages are NOT routed to the pot: the real instance serves its own
+# (modern 1.9.x config.html/net.html/… or old 1.8.x editor.html/…), and the
+# pot supplies the data behind /api/config, /api/streams and /api/log — so
+# the interface matches your real version exactly.
 #
 # Media (frame.jpeg, stream.mjpeg, stream.mp4, frame.mp4, stream.m3u8,
 # segment.ts) is NOT pot-first: viewers use those paths, so nginx sends
@@ -41,8 +45,10 @@
 #       error_page 404 = @potmedia;
 #   }
 #   location @potmedia { proxy_pass http://172.17.0.1:19840; ... }
-#   location ~ ^/(editor|add|log)\.html$ { proxy_pass http://172.17.0.1:19840; ... }
 #   location / { proxy_pass http://172.17.0.1:1984; ... }   # the real one
+#
+# Note: no page routing — the real instance serves all its UI pages
+# (a 1.9.x real serves config.html/net.html, not the old editor.html).
 
 services:
   haotian-miguan:
@@ -71,6 +77,10 @@ services:
       - "--trust-proxy"            # evidence IPs from X-Real-IP (set by nginx)
       - "--rtsp-port"
       - "0"                        # the real instance owns RTSP
+      - "--version-string"
+      - "1.9.15"                   # match your real instance (auto-adopted when reachable)
+      - "--revision"
+      - "7c05066"                  # your real build revision (auto-adopted too)
     read_only: true
     user: "65534:65534"
     cap_drop:

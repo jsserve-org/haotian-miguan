@@ -176,7 +176,29 @@ def short_id():
 TOP_KEY_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_-]*):")
 NAME_VAL_RE = re.compile(r"^([^:#]+?):\s*(.*)$")
 LIST_ITEM_RE = re.compile(r"^-\s+(.*)$")
+QUOTED_KEY_RE = re.compile(r'^"((?:[^"\\]|\\.)*)":\s*(.*)$')
 SAFE_YAML_SCALAR_RE = re.compile(r"^[A-Za-z0-9_.:/@?&=%+~,()\[\]#-]+$")
+SAFE_YAML_KEY_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.-]*$")
+
+
+def unquote_yaml(v):
+    """Undo a double-quoted YAML scalar (json escapes are a YAML subset)."""
+    v = v.strip()
+    if len(v) >= 2 and v[0] == '"' and v[-1] == '"':
+        try:
+            return json.loads(v)
+        except Exception:
+            return v[1:-1]
+    return v
+
+
+def yaml_key(name):
+    """Stream names may be anything go2rtc accepts — including CJK and
+    colons ("…內網 IP :1984"). Quote unless the name is plainly safe."""
+    name = str(name)
+    if SAFE_YAML_KEY_RE.match(name):
+        return name
+    return json.dumps(name, ensure_ascii=False)
 
 
 def yaml_scalar(v):
@@ -223,13 +245,21 @@ def split_config_text(text):
             continue
         m = LIST_ITEM_RE.match(s)
         if m and last is not None:
-            streams[last][1].append(m.group(1).strip())
+            streams[last][1].append(unquote_yaml(m.group(1).strip()))
             i += 1
             continue
-        m = NAME_VAL_RE.match(s)
+        name = val = None
+        m = QUOTED_KEY_RE.match(s)
         if m:
-            name = m.group(1).strip()
+            # "如果要編輯設定請使用 VPN 或內網 IP :1984": rtsp://…
+            name = unquote_yaml('"%s"' % m.group(1))
             val = m.group(2).strip()
+        else:
+            m = NAME_VAL_RE.match(s)
+            if m:
+                name = m.group(1).strip()
+                val = m.group(2).strip()
+        if name is not None:
             streams.append([name, []])
             last = len(streams) - 1
             if val:
@@ -242,12 +272,13 @@ def split_config_text(text):
 def render_streams_block(streams):
     out = ["streams:"]
     for name, srcs in streams:
-        if len(srcs) == 1:
-            out.append("  %s: %s" % (name, yaml_scalar(srcs[0])))
+        key = yaml_key(name)     # quote names with colons/space/CJK, e.g.
+        if len(srcs) == 1:       # "如果要編輯設定請使用 VPN 或內網 IP :1984"
+            out.append("  %s: %s" % (key, yaml_scalar(srcs[0])))
         elif len(srcs) == 0:
-            out.append("  %s: {}" % name)
+            out.append("  %s: {}" % key)
         else:
-            out.append("  %s:" % name)
+            out.append("  %s:" % key)
             for s in srcs:
                 out.append("    - " + yaml_scalar(s))
     return "\n".join(out) + "\n"
@@ -350,6 +381,7 @@ class FakeState:
         self.sanitized_streams = []   # sanitized copy of the REAL stream list
         self.deleted_names = set()     # upstream names "deleted" by attackers
         self.upstream_version = None   # real instance version (fake log lines)
+        self.upstream_revision = None  # real instance git revision (1.9.x)
         self._reseed_ts = 0.0          # lazy autoseed retry cooldown
         self.load()
 
@@ -391,6 +423,8 @@ class FakeState:
             info = json.loads(body)
             if isinstance(info, dict) and info.get("version"):
                 self.upstream_version = str(info["version"])
+            if isinstance(info, dict) and info.get("revision"):
+                self.upstream_revision = str(info["revision"])
         except Exception as e:
             CON.warn("upstream unreachable, fake logs keep version %s (%s)"
                      % (ARGS.version_string, e))
@@ -489,10 +523,16 @@ class FakeState:
                 else:
                     self.pre, self.config_streams, self.post = pre, streams, post
                     old_names = {n for n, _ in self.runtime_streams}
-                    for name, _srcs in streams:
-                        if name not in old_names:
-                            self.meta[name] = {"ip": ip, "ts": utcnow_iso(), "via": "api/config POST"}
-                            added.append(name)
+                    seed_names = {n for n, _ in self.sanitized_streams}
+                    for name, srcs in streams:
+                        if name in old_names or name in seed_names:
+                            # a name that already existed (or a real stream the
+                            # attacker is just echoing back) — not a plant
+                            continue
+                        self.meta[name] = {"ip": ip, "ts": utcnow_iso(),
+                                           "via": "api/config POST",
+                                           "sources": list(srcs)}
+                        added.append(name)
             self.save()
         return added
 
@@ -506,9 +546,11 @@ class FakeState:
             if streams is not None:
                 old_names = {n for n, _ in self.config_streams}
                 self.config_streams = merge_config_sections(self.config_streams, streams)
-                for name, _srcs in streams:
+                for name, srcs in streams:
                     if name not in old_names:
-                        self.meta[name] = {"ip": ip, "ts": utcnow_iso(), "via": "api/config PATCH"}
+                        self.meta[name] = {"ip": ip, "ts": utcnow_iso(),
+                                           "via": "api/config PATCH",
+                                           "sources": list(srcs)}
                         added.append(name)
             self.save()
         return added
@@ -539,7 +581,8 @@ class FakeState:
                 self.config_streams.append([name, list(srcs)])
             if name not in old_names:
                 self.meta[name] = {"ip": ip, "ts": utcnow_iso(),
-                                   "via": "PUT /api/streams"}
+                                   "via": "PUT /api/streams",
+                                   "sources": list(srcs)}
             self.save()
 
     def delete_stream(self, name):
@@ -643,6 +686,11 @@ def classify(method, path, query, body_text):
     if p == "/api/streams" and method in ("PUT", "PATCH", "DELETE"):
         tags.append("stream_write")
         severity = "medium"
+    if p == "/api/streams" and method == "POST" and "dst=" in (query or ""):
+        # publish/play: on a real instance this can push a camera feed to an
+        # attacker-chosen RTMP/RTSP endpoint — go2rtc's exfiltration path
+        tags.append("publish_attempt")
+        severity = "high" if re.search(r"dst=(rtsps?|rtmps?|https?)", query or "", re.I) else "medium"
     if p == "/api/restart" and method == "POST":
         tags.append("restart_attempt")
     if p == "/api/exit":
@@ -881,13 +929,22 @@ class FakeMemLog:
     def __init__(self):
         self.lines = collections.deque(maxlen=500)
         self.lock = threading.Lock()
-        for msg in [
-            ("go2rtc version %s %s" % (self.version(), GO2RTC_ARCH), "info"),
+        rev = self.revision()
+        if rev:
+            # 1.9.x logs the boot line as structured fields, not one string:
+            #   {"message":"go2rtc","platform":"linux/amd64",
+            #    "revision":"7c05066","version":"1.9.15"}
+            boot = [("go2rtc", "info", {"platform": GO2RTC_ARCH, "revision": rev,
+                                        "version": self.version()})]
+        else:
+            boot = [("go2rtc version %s %s" % (self.version(), GO2RTC_ARCH), "info")]
+        boot += [
             ("[app] config path=%s" % ARGS.config_path_label, "info"),
             ("[api] listen addr=:%d" % ARGS.port, "info", {"addr": ":%d" % ARGS.port}),
             ("[rtsp] listen addr=:%d" % ARGS.rtsp_port, "info", {"addr": ":%d" % ARGS.rtsp_port}),
             ("[webrtc] listen addr=:8555/tcp", "info", {"addr": ":8555/tcp"}),
-        ]:
+        ]
+        for msg in boot:
             self.add(msg[0], msg[1], msg[2] if len(msg) > 2 else None)
 
     def add(self, message, level="info", extra=None):
@@ -903,6 +960,13 @@ class FakeMemLog:
         if STATE and STATE.upstream_version:
             return STATE.upstream_version
         return ARGS.version_string if ARGS else GO2RTC_VERSION
+
+    def revision(self):
+        """1.9.x builds advertise a git revision — adopt the real one in
+        hybrid mode, or the operator's --revision in standalone mode."""
+        if STATE and STATE.upstream_revision:
+            return STATE.upstream_revision
+        return (ARGS.revision if ARGS else "") or ""
 
     def text(self):
         with self.lock:
@@ -2388,6 +2452,10 @@ class Handler(BaseHTTPRequestHandler):
                 "rtsp": {"listen": ":%d" % ARGS.rtsp_port if ARGS.rtsp_port else ":8554",
                          "default_query": "video&audio"},
             }
+            rev = ARGS.revision or (STATE.upstream_revision if STATE else "")
+            if rev:
+                # 1.9.x builds include a git revision in /api
+                info["revision"] = rev
             self.go_json(info)
             return 200
 
@@ -2460,22 +2528,30 @@ class Handler(BaseHTTPRequestHandler):
                 self.go_empty(200)
                 return 200
             if method == "POST":
+                # Never relayed upstream, even in hybrid mode. POST
+                # /api/streams?src=<stream>&dst=<relay url> is go2rtc's
+                # publish/play path: relaying it would ship a REAL camera
+                # feed to an attacker-chosen RTMP/RTSP endpoint. The pot
+                # replies the way a real go2rtc would and alerts instead.
                 if not dst:
                     self.go_error(400, "")
                     return 400
-                if self.upstream_check(dst) and self.upstream_check(src):
-                    # play/publish on real streams: business as usual upstream
-                    return self.passthrough(body)
-                if STATE.get_stream(dst) is None:
-                    self.go_error(404, "")
-                    return 404
-                if STATE.get_stream(src) is not None:
+                if STATE.get_stream(dst) is not None:
+                    # "play into a stream" — src must name a stream too
                     stream = STATE.get_stream(src)
-                    self.go_json({"producers": [{"url": s} for s in stream],
-                                  "consumers": None})
+                    if stream is not None:
+                        self.go_json({"producers": [{"url": x} for x in stream],
+                                      "consumers": None})
+                        return 200
+                    self.go_error(500, "")
+                    return 500
+                if STATE.get_stream(src) is not None:
+                    # "publish": real go2rtc would push and return an empty
+                    # 200 — answer identically, do nothing, keep the evidence
+                    self.go_empty(200)
                     return 200
-                self.go_error(500, "")
-                return 500
+                self.go_error(404, "")
+                return 404
             if method == "DELETE":
                 STATE.delete_stream(src)
                 self.go_empty(200)
@@ -2865,6 +2941,9 @@ def parse_args():
     p.add_argument("--data-dir", default="./data", help="evidence + state directory")
     p.add_argument("--version-string", default=GO2RTC_VERSION,
                    help="go2rtc version to impersonate (default: 1.8.5)")
+    p.add_argument("--revision", default="",
+                   help="git revision advertised in /api (1.9.x builds show "
+                        "one; hybrid mode adopts the real instance's revision)")
     p.add_argument("--config-path-label", default="/config/go2rtc.yaml",
                    help="config path shown in GET /api (fiction, never read)")
     p.add_argument("--config-file", default=None,

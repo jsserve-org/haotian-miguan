@@ -215,7 +215,9 @@ def render(data_dir, refresh):
         w("<table><tr><th>name</th><th>added by</th><th>when</th><th>via</th>"
           "<th>source</th></tr>")
         for name, meta in d["planted"].items():
-            src = ", ".join(d["sources"].get(name, []))
+            # prefer the source captured when it was planted; fall back to
+            # the current fake config for older records
+            src = ", ".join(meta.get("sources") or d["sources"].get(name, []))
             w("<tr><td class=mono>%s</td><td class=mono>%s</td><td class=time>%s</td>"
               "<td>%s</td><td class=mono>%s</td></tr>"
               % (e(name), e(meta.get("ip", "?")), e(meta.get("ts", "")),

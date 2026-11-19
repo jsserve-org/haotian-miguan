@@ -272,15 +272,12 @@ server {
         proxy_cache off;
     }
 
-    # the old-UI pages that are pure attack surface on a real instance
-    location ~ ^/(editor|add|log)\.html$ {
-        proxy_pass http://172.17.0.1:19840;
-        proxy_http_version 1.1;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
+    # NOTE: no page routing here. The REAL instance serves its own UI —
+    # including the modern 1.9.x pages (config.html, net.html, add.html,
+    # log.html, schema.json…) — while the pot supplies the data behind
+    # /api/config, /api/streams and /api/log. The UI then looks exactly
+    # like your real version, whatever era it is. (Routing 1.8.x page
+    # names to the pot would betray a 1.9.x real instance.)
 
     # ---- the viewer half: the REAL go2rtc ----
     location / {
