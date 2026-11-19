@@ -1,0 +1,16 @@
+# /etc/fail2ban/jail.d/haotian-miguan.local
+# Auto-ban anyone the honeypot catches applying configs / planting streams.
+#
+# Adjust `data/alerts.log` to wherever the honeypot writes its plain log
+# (default: <data-dir>/alerts.log). Ban via iptables/nftables as usual;
+# the honeypot itself keeps serving — the illusion stays intact.
+
+[haotian-miguan]
+enabled  = true
+filter   = haotian-miguan
+logpath  = /opt/haotian-miguan/data/alerts.log
+backend  = auto
+maxretry = 1
+findtime = 3600
+bantime  = 86400
+action   = iptables-allports[name=haotian-miguan, protocol=all]

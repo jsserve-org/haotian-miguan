@@ -1,0 +1,5 @@
+# 好甜的蜜罐 runtime evidence + caches
+data/
+__pycache__/
+*.pyc
+*.log

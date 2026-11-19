@@ -1,0 +1,9 @@
+data/
+*.md
+assets/
+extras/
+.dockerignore
+Dockerfile
+docker-compose.yml
+smoke_test.sh
+__pycache__/

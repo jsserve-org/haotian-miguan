@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    name: Fidelity + trap smoke test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Byte-compile
+        run: python3 -m py_compile honeypot.py report.py
+
+      - name: Run the pot and verify the illusion
+        run: |
+          python3 honeypot.py --port 19841 --rtsp-port 18554 --data-dir /tmp/smoke-data --quiet --no-color &
+          POT=$!
+          # give the pot a moment to bind :19841 / :18554
+          for i in $(seq 1 20); do
+            curl -sf http://127.0.0.1:19841/api > /dev/null && break
+            sleep 0.5
+          done
+          ./smoke_test.sh 127.0.0.1 19841 18554
+          RC=$?
+          kill $POT 2>/dev/null || true
+          exit $RC

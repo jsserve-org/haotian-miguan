@@ -1,0 +1,22 @@
+services:
+  haotian-miguan:
+    build: .
+    container_name: haotian-miguan
+    restart: unless-stopped
+    ports:
+      - "1984:1984"   # fake go2rtc HTTP API + old WebUI
+      - "8554:8554"    # fake RTSP
+    volumes:
+      - honeypot_data:/data
+    environment:
+      - TZ=UTC
+    # hardening: the honeypot only needs to speak TCP and write to /data
+    read_only: true
+    user: "65534:65534"
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  honeypot_data:
