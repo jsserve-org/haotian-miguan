@@ -1,0 +1,68 @@
+# 好甜的蜜罐 — HYBRID mode: the dangerous half of your REAL go2rtc
+#   docker compose -f docker-compose.hybrid.yml up -d
+#
+# Architecture: the public hostname keeps serving your real go2rtc for
+# everything a viewer needs (index, links, stream playback, /api info),
+# while nginx routes the attacker surface to this pot:
+#
+#     /api/config  /api/restart  /api/exit  /api/log
+#     /api/streams (mutations + merged listing)   /editor.html
+#     /add.html  /log.html  media+webrtc endpoints
+#
+# The pot makes the seam invisible:
+#   - auto-seeds its fake go2rtc.yaml from the real instance's stream list
+#     (credentials replaced — attackers can never harvest real passwords)
+#   - adopts the real version number for its fake log lines
+#   - /api/streams returns the real streams PLUS anything an attacker
+#     planted (after their fake "restart"), minus anything they "deleted"
+#   - viewing a planted stream serves the fake camera frame — the exact
+#     moment a real go2rtc would execute their ffmpeg #command
+#   - viewing a real stream is relayed upstream untouched (creds scrubbed
+#     from JSON on the way back)
+#
+# nginx side (drop-in for the vhost that currently returns
+# `200 "no thank you"` — see README "Hybrid" section):
+#
+#   location ~ ^/api/(config|restart|exit|log|streams|frame\.jpeg|stream\.mjpeg|stream\.mp4|frame\.mp4|stream\.m3u8|segment\.ts|webrtc)$ {
+#       proxy_pass http://172.17.0.1:19840;   # the pot
+#       ... same proxy headers as your real location block ...
+#   }
+#   location ~ ^/(editor|add|log)\.html$ { proxy_pass http://172.17.0.1:19840; ... }
+#   location / { proxy_pass http://172.17.0.1:1984; ... }   # the real one
+
+services:
+  haotian-miguan:
+    image: ghcr.io/jsserve-org/haotian-miguan:latest
+    container_name: haotian-miguan
+    restart: unless-stopped
+    ports:
+      # bridge-IP only: reachable by nginx, invisible to the internet
+      - "172.17.0.1:19840:1984"
+      # NO RTSP mapping — the real instance owns :8554 and its RTSP keeps
+      # serving real SDP/video, which makes the whole hostname consistent
+    volumes:
+      - honeypot_data:/data
+    environment:
+      - TZ=UTC
+    command:
+      # replaces the Dockerfile CMD — keep the essentials and add the flags
+      - "python3"
+      - "honeypot.py"
+      - "--host"
+      - "0.0.0.0"
+      - "--data-dir"
+      - "/data"
+      - "--upstream"
+      - "http://172.17.0.1:1984"   # your REAL go2rtc
+      - "--trust-proxy"            # evidence IPs from X-Real-IP (set by nginx)
+      - "--rtsp-port"
+      - "0"                        # the real instance owns RTSP
+    read_only: true
+    user: "65534:65534"
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  honeypot_data:

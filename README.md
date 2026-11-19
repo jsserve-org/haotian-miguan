@@ -69,7 +69,8 @@ handlers of the [`v1.8.5` tag](https://github.com/AlexxIT/go2rtc/tree/v1.8.5):
 Alert tags: `config_read` (recon) · `config_write` (the trap hit) ·
 `stream_write` · `ffmpeg_rce` (`#command=` / `#input=` payload) ·
 `exec_pattern` (shell/reverse-shell) · `template_inject` (`{input}`) ·
-`restart_attempt` · `exit_attempt` · `traversal` · `oversized` ·
+`restart_attempt` · `exit_attempt` · `planted_view` (consuming a stream
+they planted — the RCE trigger moment) · `traversal` · `oversized` ·
 `share`/`publish` (webtorrent/rtmp abuse).
 
 ---
@@ -110,6 +111,9 @@ Variants:
 - `docker-compose.proxy.yml` — run it **behind your own nginx** (shifted host
   ports `19840`/`18554`, HTTP bound to the docker bridge IP only, and
   `--trust-proxy` so evidence records the attacker's real IP)
+- `docker-compose.hybrid.yml` — **be the dangerous half of your REAL
+  go2rtc**: same public hostname, viewers hit the real instance, attackers
+  hit the pot (see below)
 - `docker-compose.build.yml` — build from source instead of pulling GHCR
 
 **Verify the illusion** (safe — it's all fake):
@@ -138,7 +142,126 @@ python3 report.py --json                # for shipping elsewhere
 --quiet                 only alerts on console     --no-color         plain console
 ```
 
-### Behind your reverse proxy (nginx)
+### Hybrid mode: your REAL go2rtc with the fangs swapped
+
+The strongest deployment doesn't advertise a separate decoy at all — the
+public hostname **is** your real instance, but everything an attacker touches
+is secretly the pot. Viewers watch real cameras; anyone who opens
+`/editor.html`, reads or applies `/api/config`, plants a stream, or pokes
+`/api/exit` lands in the honeypot with a fully consistent illusion:
+
+- the pot **auto-seeds** its fake `go2rtc.yaml` from the real instance's
+  stream list — same stream names, but credentials are replaced, so
+  attackers can never harvest your real camera passwords from the "leak"
+- the fake `/api/log` adopts the **real version string**, so nothing
+  contradicts the live `/api` response
+- `/api/streams` is a **live merge**: real streams (creds scrubbed) plus
+  whatever the attacker planted after their fake "restart", minus whatever
+  they "deleted" (their deletes never touch the real instance)
+- viewing a planted stream serves the fake camera frame — the exact moment
+  a real go2rtc would execute their `ffmpeg:…#command=`; viewing a real
+  stream is relayed upstream untouched
+- `/api/exit` kills only the illusion (the connection drops), never your
+  real process — which is a fix, because an unpatched real go2rtc can be
+  exited remotely by anyone
+
+Run it:
+
+```bash
+docker compose -f docker-compose.hybrid.yml up -d
+```
+
+(the pot talks to the real instance at `http://172.17.0.1:1984`, binds
+HTTP to the docker bridge only, keeps `--trust-proxy` on, and leaves RTSP
+to the real instance)
+
+And route your existing go2rtc vhost like this — note what is *deliberately
+missing* compared to a hardened vhost: no `no thank you` blocks, no
+`/editor.html` redirect. On the decoy surface the trap must stay open:
+
+```nginx
+map $http_upgrade $connection_upgrade {
+    default upgrade;
+    ''      close;
+}
+
+server {
+    listen 80;
+
+    # attacker payloads must reach the pot (nginx default is 1m)
+    client_max_body_size 16m;
+
+    # ---- the honeypot half: config, editor, log, streams, planted media ----
+    location ~ ^/api/(config|restart|exit|log|streams|frame\.jpeg|stream\.mjpeg|stream\.mp4|frame\.mp4|stream\.m3u8|segment\.ts|webrtc)$ {
+        proxy_pass http://172.17.0.1:19840;          # the pot
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;                     # evidence IP
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
+        proxy_buffering off;
+        proxy_cache off;
+    }
+
+    # the old-UI pages that are pure attack surface on a real instance
+    location ~ ^/(editor|add|log)\.html$ {
+        proxy_pass http://172.17.0.1:19840;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # ---- the viewer half: the REAL go2rtc ----
+    location / {
+        proxy_pass http://172.17.0.1:1984;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
+        proxy_buffering off;
+        proxy_cache off;
+    }
+}
+```
+
+Who sees what:
+
+| Request | Served by | Result |
+|---|---|---|
+| `/`, `/links.html`, `/stream.html`, media for real streams | real go2rtc | your cameras, as always |
+| `GET /api` | real go2rtc | real version/host/rtsp |
+| `GET /api/streams` | pot | merged: real streams (creds scrubbed) + planted |
+| `GET /api/config` | pot | juicy fake config, real stream names, fake passwords |
+| `POST /api/config` + `/api/restart` | pot | "applied"; their stream appears, logs say so |
+| `PUT/PATCH/DELETE /api/streams` | pot | planting logged; real config untouched |
+| `/api/frame.jpeg?src=<planted>` | pot | fake frame — the RCE trigger moment (high alert) |
+| `/api/log`, `/api/exit` | pot | fake logs; exit kills the connection, not the process |
+
+Notes:
+
+- Your REAL instance should keep `api.listen` private (LAN/localhost) —
+  nginx is its only public path; the pot is the only thing that answers
+  the dangerous endpoints.
+- Auto-seed runs at boot (and retries once a minute if the real instance
+  was restarting). Added cameras? Pull your evidence, then reseed:
+  `docker exec haotian-miguan rm /data/state.json && docker restart haotian-miguan`
+- A `planted_view` alert (severity: high) fires the moment someone
+  consumes a stream they planted — on a real go2rtc that is the instant
+  their reverse shell would have spawned. That is your paging-worthy
+  signal.
+
+## Behind your reverse proxy (nginx)
 
 If traffic reaches the pot through **your own nginx** (e.g. the classic
 `proxy_pass http://172.17.0.1:1984` setup), two things change:

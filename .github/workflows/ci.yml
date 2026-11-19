@@ -22,9 +22,10 @@ jobs:
 
       - name: Compose file validation
         run: |
-          docker compose -p haotian-miguan -f docker-compose.yml        config -q
-          docker compose -p haotian-miguan -f docker-compose.proxy.yml  config -q
-          docker compose -p haotian-miguan -f docker-compose.build.yml  config -q
+          docker compose -p haotian-miguan -f docker-compose.yml         config -q
+          docker compose -p haotian-miguan -f docker-compose.proxy.yml   config -q
+          docker compose -p haotian-miguan -f docker-compose.hybrid.yml  config -q
+          docker compose -p haotian-miguan -f docker-compose.build.yml   config -q
 
       - name: Run the pot and verify the illusion
         run: |
@@ -62,3 +63,46 @@ jobs:
           GOT2=$(python3 -c "import json;a=json.loads(open('/tmp/smoke-tp/alerts.jsonl').readlines()[-1]);print(a['ip'])")
           test "$GOT2" = "127.0.0.1"
           kill $POT 2>/dev/null || true
+
+      - name: Hybrid mode (real instance + honeypot seam)
+        run: |
+          # A stands in for the user's real go2rtc; B is the hybrid pot
+          python3 honeypot.py --port 19843 --rtsp-port 0 --version-string 1.8.4 \
+            --data-dir /tmp/hyb-a --quiet --no-color &
+          REAL=$!
+          for i in $(seq 1 20); do curl -sf http://127.0.0.1:19843/api >/dev/null && break; sleep 0.5; done
+          python3 honeypot.py --port 19844 --rtsp-port 0 \
+            --upstream http://127.0.0.1:19843 \
+            --data-dir /tmp/hyb-b --quiet --no-color &
+          POT=$!
+          for i in $(seq 1 20); do curl -sf http://127.0.0.1:19844/api >/dev/null && break; sleep 0.5; done
+          sleep 1
+          set -e
+          # auto-seed: the fake config carries the real stream names,
+          # credentials sanitized — never the real passwords
+          curl -s http://127.0.0.1:19844/api/config | grep -q "Restream2026"
+          ! curl -s http://127.0.0.1:19844/api/config | grep -q "DoorCam2024"
+          # /api adopts the real version; host stays the client's
+          curl -s http://127.0.0.1:19844/api | grep -q '"version": "1.8.4"'
+          # merged listing shows the real streams
+          curl -s http://127.0.0.1:19844/api/streams | grep -q front_door
+          # attacker applies a config + "restarts" — their stream appears
+          curl -s -o /dev/null -X POST --data-binary \
+            $'streams:\n  ci_pwn: ffmpeg:rtsp://1.2.3.4/x#video=copy#command=id\n' \
+            http://127.0.0.1:19844/api/config
+          curl -s -o /dev/null -X POST http://127.0.0.1:19844/api/restart
+          curl -s http://127.0.0.1:19844/api/streams | grep -q ci_pwn
+          # fake log adopts the real version
+          curl -s http://127.0.0.1:19844/api/log | grep -q "go2rtc version 1.8.4"
+          # viewing the planted stream = the RCE trigger (high alert)
+          curl -s -o /dev/null http://127.0.0.1:19844/api/frame.jpeg?src=ci_pwn
+          GOT=$(python3 -c "import json;a=json.loads(open('/tmp/hyb-b/alerts.jsonl').readlines()[-1]);print(a['tags'],a['severity'])")
+          echo "planted-view alert -> $GOT"
+          echo "$GOT" | grep -q planted_view
+          echo "$GOT" | grep -q high
+          # deleting a REAL stream hides it locally, never touches upstream
+          curl -s -o /dev/null -X DELETE http://127.0.0.1:19844/api/streams?src=front_door
+          ! curl -s http://127.0.0.1:19844/api/streams | grep -q '"front_door"'
+          curl -s http://127.0.0.1:19843/api/streams | grep -q '"front_door"'
+          set +e
+          kill $POT $REAL 2>/dev/null || true

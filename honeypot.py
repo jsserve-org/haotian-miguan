@@ -83,6 +83,9 @@ MAX_BODY_DEFAULT = 8 * 1024 * 1024   # 8 MiB request body cap (safety valve)
 STREAM_STALL_SECONDS = 12           # how long fake mp4/ts endpoints hang
 MJPEG_FPS = 1.0                     # frames per second of fake mjpeg
 MJPEG_MAX_FRAMES = 3600
+UPSTREAM_TIMEOUT = 15               # hybrid mode: real go2rtc fetch timeout
+
+SEV_RANK = {"low": 0, "medium": 1, "high": 2}
 
 # fake camera frame (dark night-cam noise) served by /api/frame.jpeg etc.
 CAMERA_FRAME_JPEG_B64 = "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"
@@ -283,6 +286,51 @@ def merge_config_sections(old, new):
 
 
 # ---------------------------------------------------------------------------
+# Hybrid mode: talking to the REAL go2rtc upstream
+# ---------------------------------------------------------------------------
+
+CRED_URL_RE = re.compile(r"(?i)([a-z][a-z0-9+.-]*://)([^/@?\s]*):([^/@?\s]*)@")
+
+
+def sanitize_creds(url):
+    """Replace userinfo passwords with a plausible fake. Used whenever the
+    pot reflects or relays REAL source URLs, so the decoy never leaks the
+    real camera credentials it observed in the upstream stream list."""
+    return CRED_URL_RE.sub(lambda m: "%s%s:Restream2026@" % (m.group(1), m.group(2) or "admin"), url)
+
+
+def scrub_json_creds(obj):
+    """Recursively sanitize every 'url' field in an upstream JSON response."""
+    if isinstance(obj, dict):
+        return {k: (sanitize_creds(v) if k == "url" and isinstance(v, str) else scrub_json_creds(v))
+                for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [scrub_json_creds(x) for x in obj]
+    return obj
+
+
+class UpstreamError(Exception):
+    pass
+
+
+def upstream_fetch(method, path_query, body=None, ctype=None):
+    """Blocking fetch from the real go2rtc. Returns (status, ctype, body)."""
+    if not ARGS.upstream:
+        raise UpstreamError("no upstream configured")
+    url = ARGS.upstream.rstrip("/") + path_query
+    req = urllib.request.Request(url, data=body, method=method)
+    if ctype:
+        req.add_header("Content-Type", ctype)
+    try:
+        with urllib.request.urlopen(req, timeout=UPSTREAM_TIMEOUT) as r:
+            return r.status, r.headers.get("Content-Type"), r.read()
+    except urllib.error.HTTPError as e:
+        return e.code, e.headers.get("Content-Type"), e.read()
+    except Exception as e:
+        raise UpstreamError(str(e))
+
+
+# ---------------------------------------------------------------------------
 # Fake state: the "config file on disk" + the "runtime streams map"
 # ---------------------------------------------------------------------------
 
@@ -298,6 +346,11 @@ class FakeState:
         self.runtime_streams = []      # [[name, [srcs]], ...]
         self.meta = {}                 # name -> {"ip","ts","via"} attacker-added
         self.share = None              # webtorrent share {share,pwd}
+        # hybrid mode bookkeeping
+        self.sanitized_streams = []   # sanitized copy of the REAL stream list
+        self.deleted_names = set()     # upstream names "deleted" by attackers
+        self.upstream_version = None   # real instance version (fake log lines)
+        self._reseed_ts = 0.0          # lazy autoseed retry cooldown
         self.load()
 
     # -- persistence ------------------------------------------------------
@@ -313,6 +366,8 @@ class FakeState:
                 self.raw = d.get("raw")
                 self.meta = d.get("meta", {})
                 self.share = d.get("share")
+                self.sanitized_streams = d.get("sanitized_streams", [])
+                self.deleted_names = set(d.get("deleted_names", []))
             except Exception:
                 pass
         else:
@@ -321,8 +376,48 @@ class FakeState:
                 with open(ARGS.config_file, "r", encoding="utf-8") as f:
                     text = f.read()
             self.pre, self.config_streams, self.post = split_config_text(text)
+            if ARGS.upstream and not (ARGS.config_file and os.path.exists(ARGS.config_file)):
+                self._autoseed()
         with self.lock:
             self.runtime_streams = [list(x) for x in self.config_streams]
+
+    def _autoseed(self):
+        """Hybrid mode: mirror the REAL instance so the decoy is seamless.
+        Adopt its version for the fake log lines and build the fake
+        go2rtc.yaml from its stream list — with credentials replaced, so
+        attackers can never harvest real camera passwords from the pot."""
+        try:
+            st, ct, body = upstream_fetch("GET", "/api")
+            info = json.loads(body)
+            if isinstance(info, dict) and info.get("version"):
+                self.upstream_version = str(info["version"])
+        except Exception as e:
+            CON.warn("upstream unreachable, fake logs keep version %s (%s)"
+                     % (ARGS.version_string, e))
+        try:
+            st, ct, body = upstream_fetch("GET", "/api/streams")
+            data = json.loads(body)
+            seeded = []
+            if isinstance(data, dict) and data:
+                for name, info in data.items():
+                    srcs = []
+                    if isinstance(info, dict):
+                        for p in (info.get("producers") or []):
+                            u = p.get("url") if isinstance(p, dict) else None
+                            if isinstance(u, str) and u:
+                                srcs.append(sanitize_creds(u))
+                    if not srcs:
+                        srcs = ["rtsp://admin:Restream2026@192.168.1.50:554/stream"]
+                    seeded.append([name, srcs])
+            if seeded:
+                seeded.sort(key=lambda x: x[0])
+                _pre, _old, _post = split_config_text(DEFAULT_CONFIG)
+                self.pre, self.config_streams, self.post = _pre, seeded, _post
+                self.sanitized_streams = [list(x) for x in seeded]
+                CON.print("    hybrid: seeded %d real streams (creds sanitized)"
+                          % len(seeded))
+        except Exception as e:
+            CON.warn("hybrid: could not seed from upstream (%s) — using default bait" % e)
 
     def save(self):
         try:
@@ -334,6 +429,8 @@ class FakeState:
                     "raw": self.raw,
                     "meta": self.meta,
                     "share": self.share,
+                    "sanitized_streams": self.sanitized_streams,
+                    "deleted_names": sorted(self.deleted_names),
                 }, f, ensure_ascii=False, indent=1)
         except Exception as e:
             CON.dim("state save failed: %s" % e)
@@ -345,10 +442,35 @@ class FakeState:
 
     # -- config file API ----------------------------------------------------
     def config_text(self):
+        self._maybe_reseed()
         with self.lock:
             if self.raw is not None:
                 return self.raw          # byte-for-byte what was "written"
             return render_config(self.pre, self.config_streams, self.post)
+
+    def _maybe_reseed(self):
+        """Lazy retry of the upstream auto-seed (max once a minute). Covers
+        a real instance that was still starting when the pot booted; only
+        adopts while no attacker has shaped the fake config yet."""
+        if not ARGS.upstream or self.sanitized_streams:
+            return
+        now = time.time()
+        if now - self._reseed_ts < 60:
+            return
+        self._reseed_ts = now
+        with self.lock:
+            if self.raw is not None or self.meta:
+                return  # an attacker already wrote their story — keep it
+            try:
+                self._autoseed()
+            except Exception:
+                return
+            if self.sanitized_streams:
+                self.config_streams = [list(x) for x in self.sanitized_streams]
+                self.runtime_streams = [list(x) for x in self.sanitized_streams]
+                self.save()
+                CON.print("    hybrid: reseeded %d streams from upstream"
+                          % len(self.sanitized_streams))
 
     def apply_config(self, text, ip):
         """POST /api/config — full document replace (real v1.8.5 writes the
@@ -421,11 +543,57 @@ class FakeState:
             self.save()
 
     def delete_stream(self, name):
+        """DELETE /api/streams?src=. Planted streams vanish from the fake
+        state; a REAL (upstream) stream only vanishes from our merged view —
+        the real instance itself is never touched."""
         with self.lock:
             self.raw = None    # PatchConfig re-renders the file
+            if name in dict(self.sanitized_streams):
+                # deleting an upstream stream: hide it locally, stay intact upstream
+                self.deleted_names.add(name)
             self.runtime_streams = [[n, s] for n, s in self.runtime_streams if n != name]
             self.config_streams = [[n, s] for n, s in self.config_streams if n != name]
             self.save()
+
+    def is_planted(self, name):
+        """True when `name` is an attacker-planted/modified stream (not one
+        of the sanitized seeds mirrored from the real instance). Only
+        meaningful in hybrid mode; decides pot-vs-upstream routing."""
+        with self.lock:
+            srcs = dict(self.runtime_streams).get(name)
+            if srcs is None:
+                return False
+            seed = dict(self.sanitized_streams).get(name)
+            return seed != srcs
+
+    def merged_streams_json(self):
+        """Hybrid /api/streams listing: the REAL streams (with credentials
+        replaced) plus whatever the attacker planted, minus what they
+        'deleted'. Falls back to seed+planted if the upstream is down."""
+        self._maybe_reseed()
+        base = {}
+        if ARGS.upstream:
+            try:
+                st, ct, body = upstream_fetch("GET", "/api/streams")
+                data = json.loads(body)
+                if isinstance(data, dict):
+                    base = data
+            except UpstreamError:
+                pass
+        seed_map = dict(self.sanitized_streams)
+        for n in self.deleted_names:
+            base.pop(n, None)
+        for n, s in seed_map.items():
+            if n in self.deleted_names:
+                continue
+            base[n] = {"producers": [{"url": x} for x in s], "consumers": None}
+        for n, s in self.runtime_streams:
+            # overlay the attacker's view of a stream: their new streams, or
+            # their modified version of an existing one — never the default
+            # bait (that would betray the pot if seeding never succeeded)
+            if n in self.meta or (seed_map and seed_map.get(n) != s):
+                base[n] = {"producers": [{"url": x} for x in s], "consumers": None}
+        return base
 
     def has_scheme(self, source):
         """streams.Patch() allows aliases to existing stream names, otherwise
@@ -625,7 +793,7 @@ class FakeMemLog:
         self.lines = collections.deque(maxlen=500)
         self.lock = threading.Lock()
         for msg in [
-            ("go2rtc version %s %s" % (ARGS.version_string, GO2RTC_ARCH), "info"),
+            ("go2rtc version %s %s" % (self.version(), GO2RTC_ARCH), "info"),
             ("[app] config path=%s" % ARGS.config_path_label, "info"),
             ("[api] listen addr=:%d" % ARGS.port, "info", {"addr": ":%d" % ARGS.port}),
             ("[rtsp] listen addr=:%d" % ARGS.rtsp_port, "info", {"addr": ":%d" % ARGS.rtsp_port}),
@@ -639,6 +807,13 @@ class FakeMemLog:
             obj.update(extra)
         with self.lock:
             self.lines.append(obj)
+
+    def version(self):
+        """Hybrid mode adopts the REAL instance's version so the fake log
+        never contradicts the live /api response."""
+        if STATE and STATE.upstream_version:
+            return STATE.upstream_version
+        return ARGS.version_string if ARGS else GO2RTC_VERSION
 
     def text(self):
         with self.lock:
@@ -1904,11 +2079,92 @@ class Handler(BaseHTTPRequestHandler):
     def go_empty(self, status=200, close=False):
         self.respond(status, b"", close=close)
 
+    # -- hybrid mode: relay to the REAL go2rtc -------------------------------
+    PASSTHROUGH_FWD_HEADERS = ("Content-Type", "Range", "Accept",
+                                "Authorization", "User-Agent")
+
+    def upstream_check(self, name):
+        """Hybrid routing decision for a stream name: hand it to the REAL
+        go2rtc only when it is neither attacker-planted nor 'deleted' by an
+        attacker. Everything else is ours to fake."""
+        return (ARGS.upstream
+                and name not in STATE.deleted_names
+                and not STATE.is_planted(name))
+
+    def passthrough(self, body=None):
+        """Relay this request to the real go2rtc and stream the response
+        back. Used in hybrid mode for anything that doesn't involve an
+        attacker-planted stream. Binary bodies (media, SDP) pass through
+        untouched; JSON goes through passthrough_json (scrubbed)."""
+        url = ARGS.upstream.rstrip("/") + self.path
+        req = urllib.request.Request(
+            url,
+            data=body if (body and self.command in ("POST", "PUT", "PATCH")) else None,
+            method=self.command)
+        for h in self.PASSTHROUGH_FWD_HEADERS:
+            v = self.headers.get(h)
+            if v:
+                req.add_header(h, v)
+        try:
+            r = urllib.request.urlopen(req, timeout=UPSTREAM_TIMEOUT)
+        except urllib.error.HTTPError as e:
+            r = e
+        except Exception:
+            self.go_error(502, "")
+            return 502
+        try:
+            status = getattr(r, "status", None) or getattr(r, "code", 200)
+            ctype = r.headers.get("Content-Type")
+            self.wfile.write(("HTTP/1.1 %d %s\r\n" % (status, HTTP_REASONS.get(status, "Status"))).encode())
+            self.send_header("Date", self.date_time_string())
+            if ctype:
+                self.send_header("Content-Type", ctype)
+            self.send_header("Connection", "close")
+            self.end_headers()
+            self.close_connection = True
+            if self.command == "HEAD":
+                return status
+            while True:
+                chunk = r.read(8192)
+                if not chunk:
+                    break
+                self.wfile.write(chunk)
+        except (BrokenPipeError, ConnectionResetError, OSError):
+            pass
+        finally:
+            try:
+                r.close()
+            except Exception:
+                pass
+        return status
+
+    def passthrough_json(self, body=None):
+        """Fetch the upstream response as JSON, scrub credentials from any
+        'url' fields, and re-serve it (pretty like go2rtc's single-stream
+        API). Falls back to a raw passthrough on parse errors."""
+        try:
+            st, ct, up_body = upstream_fetch(self.command, self.path, body,
+                                             self.headers.get("Content-Type"))
+        except UpstreamError:
+            self.go_error(502, "")
+            return 502
+        try:
+            data = json.loads(up_body)
+        except Exception:
+            self.respond(st, up_body, ct or "application/json", close=True)
+            self.close_connection = True
+            return st
+        scrubbed = scrub_json_creds(data)
+        self.go_json(scrubbed, status=st, pretty=isinstance(data, dict), close=True)
+        self.close_connection = True
+        return st
+
     # -- main dispatch -------------------------------------------------------
     def _handle(self):
         t0 = time.perf_counter()
         peer, port = self.client_address[0], self.client_address[1]
         ip = self._client_ip(peer)
+        self._planted_view = None
         raw = self.path
         split = urllib.parse.urlsplit(raw)
         path = urllib.parse.unquote(split.path) or "/"
@@ -1953,6 +2209,19 @@ class Handler(BaseHTTPRequestHandler):
             # payloads in URL params (%23 for #, etc.)
             decoded_q = urllib.parse.unquote_plus(query) if query else ""
             tags, severity, note = classify(method, path, decoded_q, body_text)
+
+            # the RCE-trigger moment: someone consuming a stream they planted
+            pv = self._planted_view
+            if pv:
+                pv_tag, pv_sev = pv
+                tags = tags + ([pv_tag] if pv_tag not in tags else [])
+                severity = severity or "low"
+                if SEV_RANK[pv_sev] > SEV_RANK[severity]:
+                    severity = pv_sev
+                trig = ("viewing a stream they planted — on a real go2rtc "
+                        "this is the moment their ffmpeg #command runs")
+                note = (note + " · " + trig) if note else trig
+
             if oversized:
                 tags = tags + ["oversized"]
                 severity = "medium"
@@ -1974,16 +2243,22 @@ class Handler(BaseHTTPRequestHandler):
         """Feed the fake go2rtc memory log so /api/log tells the attacker
         the story they want to believe."""
         if "restart_attempt" in tags:
-            MEMLOG.add("go2rtc version %s %s" % (ARGS.version_string, GO2RTC_ARCH), "info")
+            MEMLOG.add("go2rtc version %s %s" % (MEMLOG.version(), GO2RTC_ARCH), "info")
             MEMLOG.add("[app] config path=%s" % ARGS.config_path_label, "info")
 
     def _consumer_note(self, src):
         """When someone 'watches' a stream whose source is an attacker-planted
         ffmpeg: producer, log the producer start in the fake go2rtc log —
-        exactly what a successfully exploited go2rtc would print."""
+        exactly what a successfully exploited go2rtc would print. If the
+        stream itself was planted by an attacker, flag the request: on a
+        real instance this is the moment their ffmpeg #command would run."""
         sources = STATE.get_stream(src)
         if not sources:
             return
+        if src in STATE.meta:
+            hot = any(FFMPEG_CMD_RE.search(s) or EXEC_RE.search(s)
+                      or s.startswith("ffmpeg:") for s in sources)
+            self._planted_view = ("planted_view", "high" if hot else "medium")
         for prod in sources:
             if prod.startswith("ffmpeg:"):
                 MEMLOG.add("[streams] start producer url=%s" % prod, "debug")
@@ -2005,6 +2280,18 @@ class Handler(BaseHTTPRequestHandler):
 
         # ---- /api ----
         if path == "/api":
+            if ARGS.upstream:
+                # hybrid: adopt the REAL instance's identity, but keep the
+                # client-visible host so nothing betrays the hop
+                try:
+                    st, ct, body = upstream_fetch("GET", "/api")
+                    info = json.loads(body)
+                    if isinstance(info, dict):
+                        info["host"] = self.headers.get("Host") or ""
+                        self.go_json(info)
+                        return 200
+                except Exception:
+                    pass
             info = {
                 "version": ARGS.version_string,
                 "config_path": ARGS.config_path_label,
@@ -2051,9 +2338,16 @@ class Handler(BaseHTTPRequestHandler):
             dst = (q.get("dst") or [""])[0]
             name = (q.get("name") or [""])[0]
             if src == "" and method != "POST":
-                self.go_json(STATE.streams_json())
+                if ARGS.upstream:
+                    # hybrid: live merge of the real streams + planted ones
+                    self.go_json(STATE.merged_streams_json())
+                else:
+                    self.go_json(STATE.streams_json())
                 return 200
             if method == "GET":
+                if self.upstream_check(src):
+                    # a real stream: relay the upstream view (creds scrubbed)
+                    return self.passthrough_json()
                 stream = STATE.get_stream(src)
                 self.go_json({"producers": [{"url": s} for s in (stream or [])],
                               "consumers": None} if stream else None, pretty=True)
@@ -2080,6 +2374,9 @@ class Handler(BaseHTTPRequestHandler):
                 if not dst:
                     self.go_error(400, "")
                     return 400
+                if self.upstream_check(dst) and self.upstream_check(src):
+                    # play/publish on real streams: business as usual upstream
+                    return self.passthrough(body)
                 if STATE.get_stream(dst) is None:
                     self.go_error(404, "")
                     return 404
@@ -2103,6 +2400,9 @@ class Handler(BaseHTTPRequestHandler):
                 src = (q.get("src") or [""])[0]
                 dst = (q.get("dst") or [""])[0]
                 if src:
+                    if self.upstream_check(src):
+                        # real stream: let the real go2rtc negotiate WebRTC
+                        return self.passthrough(body)
                     stream = STATE.get_stream(src)
                     if stream is None:
                         # faithful v1.8.5 quirk: silent 200, empty body
@@ -2133,6 +2433,8 @@ class Handler(BaseHTTPRequestHandler):
                         self.respond(200, answer.encode(), "text/plain; charset=utf-8")
                     return 200
                 if dst:
+                    if self.upstream_check(dst):
+                        return self.passthrough(body)
                     if STATE.get_stream(dst) is None:
                         self.go_error(404, "stream not found")
                         return 404
@@ -2158,6 +2460,8 @@ class Handler(BaseHTTPRequestHandler):
         # ---- /api/frame.jpeg ----
         if path == "/api/frame.jpeg" and method in ("GET", "HEAD"):
             src = (q.get("src") or [""])[0]
+            if self.upstream_check(src):
+                return self.passthrough()
             if STATE.get_stream(src) is None:
                 self.go_error(404, "stream not found")
                 return 404
@@ -2172,11 +2476,15 @@ class Handler(BaseHTTPRequestHandler):
             src = (q.get("src") or [""])[0] if method != "POST" else None
             dst = (q.get("dst") or [""])[0] if method == "POST" else None
             if method == "POST":
+                if self.upstream_check(dst):
+                    return self.passthrough(body)
                 if STATE.get_stream(dst) is None:
                     self.go_error(404, "stream not found")
                     return 404
                 self.go_empty(200)
                 return 200
+            if self.upstream_check(src):
+                return self.passthrough()
             if STATE.get_stream(src) is None:
                 self.go_error(404, "stream not found")
                 return 404
@@ -2202,6 +2510,8 @@ class Handler(BaseHTTPRequestHandler):
         # ---- /api/stream.m3u8 ----
         if path == "/api/stream.m3u8" and method in ("GET", "HEAD"):
             src = (q.get("src") or [""])[0]
+            if self.upstream_check(src):
+                return self.passthrough()
             if STATE.get_stream(src) is None:
                 self.go_error(404, "stream not found")
                 return 404
@@ -2222,6 +2532,8 @@ class Handler(BaseHTTPRequestHandler):
         if path in ("/api/stream.mp4", "/api/frame.mp4", "/api/segment.ts") \
                 and method in ("GET", "HEAD"):
             src = (q.get("src") or [""])[0]
+            if self.upstream_check(src):
+                return self.passthrough()
             if STATE.get_stream(src) is None:
                 self.go_error(404, "stream not found")
                 return 404
@@ -2476,6 +2788,12 @@ def parse_args():
                    help="we sit behind YOUR reverse proxy (nginx): evidence IPs "
                         "come from X-Real-IP / rightmost X-Forwarded-For hop "
                         "instead of the proxy's address")
+    p.add_argument("--upstream", default=None, metavar="URL",
+                   help="HYBRID MODE: base URL of your REAL go2rtc (e.g. "
+                        "http://172.17.0.1:1984). Non-attacker traffic is "
+                        "relayed to it (credentials scrubbed), the fake "
+                        "config/log auto-seed from it, and planted streams "
+                        "overlay it in /api/streams")
     p.add_argument("--quiet", action="store_true", help="no per-request console lines")
     p.add_argument("--no-color", action="store_true", help="disable ANSI colors")
     return p.parse_args()
