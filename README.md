@@ -159,8 +159,9 @@ is secretly the pot. Viewers watch real cameras; anyone who opens
   whatever the attacker planted after their fake "restart", minus whatever
   they "deleted" (their deletes never touch the real instance)
 - viewing a planted stream serves the fake camera frame — the exact moment
-  a real go2rtc would execute their `ffmpeg:…#command=`; viewing a real
-  stream is relayed upstream untouched
+  a real go2rtc would execute their `ffmpeg:…#command=` — while real
+  streams never leave the real instance (nginx gives the pot only the
+  media requests that the real instance 404s)
 - `/api/exit` kills only the illusion (the connection drops), never your
   real process — which is a fix, because an unpatched real go2rtc can be
   exited remotely by anyone
@@ -191,8 +192,8 @@ server {
     # attacker payloads must reach the pot (nginx default is 1m)
     client_max_body_size 16m;
 
-    # ---- the honeypot half: config, editor, log, streams, planted media ----
-    location ~ ^/api/(config|restart|exit|log|streams|frame\.jpeg|stream\.mjpeg|stream\.mp4|frame\.mp4|stream\.m3u8|segment\.ts|webrtc)$ {
+    # ---- the honeypot half: control + config (serves users nothing) ----
+    location ~ ^/api/(config|restart|exit|log|streams|webrtc)$ {
         proxy_pass http://172.17.0.1:19840;          # the pot
         proxy_http_version 1.1;
         proxy_set_header Host $host;
@@ -201,6 +202,38 @@ server {
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection $connection_upgrade;
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
+        proxy_buffering off;
+        proxy_cache off;
+    }
+
+    # ---- media: YOUR VIEWERS go straight to the real instance. The pot
+    #      answers only what the real instance rejects — its 404 means
+    #      "a stream I've never heard of", i.e. something an attacker
+    #      planted. Users never touch the pot on this path. ----
+    location ~ ^/api/(frame\.jpeg|stream\.mjpeg|stream\.mp4|frame\.mp4|stream\.m3u8|segment\.ts)$ {
+        proxy_pass http://172.17.0.1:1984;           # real go2rtc first
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_intercept_errors on;
+        error_page 404 = @potmedia;                  # unknown stream → the pot
+    }
+
+    location @potmedia {
+        proxy_pass http://172.17.0.1:19840;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
         proxy_read_timeout 3600s;
         proxy_send_timeout 3600s;
         proxy_buffering off;
@@ -245,23 +278,42 @@ Who sees what (endpoint names are go2rtc's own — note `.mjpeg`, not
 | `GET /api/config` | pot | juicy fake config, real stream names, fake passwords |
 | `POST /api/config` + `/api/restart` | pot | "applied"; their stream appears, logs say so |
 | `PUT/PATCH/DELETE /api/streams` | pot | planting logged; real config untouched |
-| media (`frame.jpeg`, `stream.mjpeg`, `stream.mp4`, `frame.mp4`, `stream.m3u8`) + `/api/webrtc` for a REAL stream | pot → relayed upstream | the same bytes as before, one local hop, JSON creds scrubbed |
-| media + `/api/webrtc` for a PLANTED stream | pot | fake frame — the RCE trigger moment (high alert) |
+| media (`frame.jpeg`, `stream.mjpeg`, `stream.mp4`, `frame.mp4`, `stream.m3u8`, `segment.ts`) for a REAL stream | real go2rtc, direct | your viewers never touch the pot |
+| media for a stream the real instance doesn't know (attacker-planted) | real says 404 → nginx intercepts → pot | fake frame/MJPEG — the RCE trigger moment (high alert) |
+| `/api/webrtc` for a REAL stream | pot → relayed upstream | legacy sync signaling only; relayed untouched |
+| `/api/webrtc` for a PLANTED stream | pot | pot's answer SDP (real go2rtc would go silent-200) |
 | `/api/log`, `/api/exit` | pot | fake logs; exit kills the connection, not the process |
 
-Why do media endpoints route through the pot at all? Because the
-attacker's RCE trigger **is** a media request: `/api/frame.jpeg?src=<their
-planted stream>` is how you make a real go2rtc spawn their
-`ffmpeg:…#command=`. If that request hit the real instance it would 404
-and the illusion would break at its climax. Routing media through the
-pot costs real viewers one extra local hop and buys the whole trap.
-The paths in the nginx regex are exactly the media/signaling routes
-go2rtc v1.8.5 advertises on its own `links.html` page, so nothing an
-attacker expects is missing. HLS segments for real streams keep working
-too: the passthrough playlist carries the real segment URLs, which fall
-through to `location /` → real instance. `/api/ws` — what the real WebUI
-(and the Home Assistant card) actually plays through — stays direct on
-the real instance and never touches the pot.
+Why is media **not** pot-first? Because your viewers actually use it:
+`stream.mjpeg` on a wall display, `frame.jpeg` snapshots, HLS on phones.
+Their streams must never depend on the honeypot. go2rtc answers
+`404 stream not found` for any stream it doesn't know (verified against
+the v1.8.5 media handlers: `frame.jpeg`, `stream.mjpeg`, `stream.mp4`,
+`frame.mp4`, `stream.m3u8` all do) — so nginx sends media to the real
+instance and lets **its 404 be the attacker detector**:
+`error_page 404 = @potmedia` hands exactly those requests to the pot. A
+viewer watching `front_door` goes straight to the real instance — no
+extra hop, no extra failure domain; an attacker asking for the `rev_shell`
+they just planted gets the pot's fake frame because the real instance has
+never heard of that stream. If the pot is down, viewers notice nothing at
+all — only requests for streams that don't exist on the real instance
+would see a 502 instead of a 404.
+
+Two honest edges of the fallback:
+
+- if an attacker plants a stream under a name that **already exists** on
+  the real instance, their media requests get the real camera (200, so no
+  fallback). The classic exploit plants a fresh name, which is fully
+  covered; the overwrite case shows the real video instead of the fake
+  frame. The planted config still shows up in `/api/streams` and
+  `/api/config`, and the write itself is alerted.
+- Chrome requests `frame.mp4` twice (once without `Range`, once with);
+  the Range-less probe gets the real instance's empty 200, the real
+  request falls through to the pot as described.
+
+`/api/ws` is deliberately in neither block: it is what the real WebUI and
+the Home Assistant card actually play through, so it stays direct on the
+real instance.
 
 Notes:
 

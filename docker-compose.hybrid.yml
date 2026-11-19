@@ -7,7 +7,12 @@
 #
 #     /api/config  /api/restart  /api/exit  /api/log
 #     /api/streams (mutations + merged listing)   /editor.html
-#     /add.html  /log.html  media+webrtc endpoints
+#     /add.html  /log.html  /api/webrtc
+#
+# Media (frame.jpeg, stream.mjpeg, stream.mp4, frame.mp4, stream.m3u8,
+# segment.ts) is NOT pot-first: viewers use those paths, so nginx sends
+# them to the REAL instance and only hands over what it 404s ("stream not
+# found" = something an attacker planted). Users never touch the pot here.
 #
 # The pot makes the seam invisible:
 #   - auto-seeds its fake go2rtc.yaml from the real instance's stream list
@@ -17,16 +22,25 @@
 #     planted (after their fake "restart"), minus anything they "deleted"
 #   - viewing a planted stream serves the fake camera frame — the exact
 #     moment a real go2rtc would execute their ffmpeg #command
-#   - viewing a real stream is relayed upstream untouched (creds scrubbed
-#     from JSON on the way back)
+#   - viewing a real stream never leaves the real instance
+#     (and /api/webrtc for a real stream is relayed upstream untouched)
 #
 # nginx side (drop-in for the vhost that currently returns
 # `200 "no thank you"` — see README "Hybrid" section):
 #
-#   location ~ ^/api/(config|restart|exit|log|streams|frame\.jpeg|stream\.mjpeg|stream\.mp4|frame\.mp4|stream\.m3u8|segment\.ts|webrtc)$ {
+#   # control surface → the pot
+#   location ~ ^/api/(config|restart|exit|log|streams|webrtc)$ {
 #       proxy_pass http://172.17.0.1:19840;   # the pot
 #       ... same proxy headers as your real location block ...
 #   }
+#   # media → the REAL instance first; its 404 goes to the pot
+#   location ~ ^/api/(frame\.jpeg|stream\.mjpeg|stream\.mp4|frame\.mp4|stream\.m3u8|segment\.ts)$ {
+#       proxy_pass http://172.17.0.1:1984;
+#       ... same proxy headers ...
+#       proxy_intercept_errors on;
+#       error_page 404 = @potmedia;
+#   }
+#   location @potmedia { proxy_pass http://172.17.0.1:19840; ... }
 #   location ~ ^/(editor|add|log)\.html$ { proxy_pass http://172.17.0.1:19840; ... }
 #   location / { proxy_pass http://172.17.0.1:1984; ... }   # the real one
 
