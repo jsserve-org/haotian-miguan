@@ -121,7 +121,7 @@ jobs:
           ! curl -s -H 'Sec-Fetch-Site: same-origin' http://127.0.0.1:19866/api/streams | grep -q ui_pwn
           kill $POT $REAL 2>/dev/null || true
 
-      - name: exec: source detection (the 1.9.x RCE primitive)
+      - name: "exec: source detection (the 1.9.x RCE primitive)"
         run: |
           python3 honeypot.py --port 19869 --rtsp-port 0 --data-dir /tmp/exec-a --quiet --no-color &
           POT=$!
