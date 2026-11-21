@@ -68,10 +68,11 @@ handlers of the [`v1.8.5` tag](https://github.com/AlexxIT/go2rtc/tree/v1.8.5):
 
 Alert tags: `config_read` (recon) · `config_write` (the trap hit) ·
 `stream_write` · `ffmpeg_rce` (`#command=` / `#input=` payload) ·
-`exec_pattern` (shell/reverse-shell) · `template_inject` (`{input}`) ·
-`restart_attempt` · `exit_attempt` · `planted_view` (consuming a stream
-they planted — the RCE trigger moment) · `traversal` · `oversized` ·
-`share`/`publish` (webtorrent/rtmp abuse).
+`exec_source` (`exec:` source — runs its argument in a shell; go2rtc marks
+it insecure) · `exec_pattern` (shell/reverse-shell) · `template_inject`
+(`{input}`) · `restart_attempt` · `exit_attempt` · `planted_view`
+(consuming a stream they planted — the RCE trigger moment) · `traversal` ·
+`oversized` · `share`/`publish` (webtorrent/rtmp abuse).
 
 ---
 

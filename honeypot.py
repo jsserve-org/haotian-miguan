@@ -72,11 +72,14 @@ GO2RTC_VERSION = "1.8.5"          # the version we pretend to run (old & juicy)
 GO2RTC_ARCH = "linux/amd64"
 RTSP_PUBLIC_METHODS = "OPTIONS, DESCRIBE, SETUP, TEARDOWN, PLAY, PAUSE, ANNOUNCE, RECORD"
 
-# producer schemes registered in real go2rtc v1.8.5 (streams.handlers registry)
+# producer schemes registered in real go2rtc (1.8.x registry + the 1.9.x-era
+# additions — notably `exec`, which runs a shell command and is marked
+# insecure by go2rtc itself)
 KNOWN_SCHEMES = {
-    "bubble", "dvrip", "echo", "ffmpeg", "gopro", "hass", "homekit", "http",
-    "https", "isapi", "ivideon", "nest", "onvif", "roborock", "rtmp", "rtmps",
-    "rtsp", "rtsps", "rtspx", "srtp", "tapo", "tcp", "udp", "webtorrent",
+    "alsa", "bubble", "dvrip", "echo", "exec", "ffmpeg", "gopro", "hass",
+    "homekit", "http", "https", "isapi", "ivideon", "nest", "onvif", "ring",
+    "roborock", "rtmp", "rtmps", "rtsp", "rtsps", "rtspx", "srtp", "tapo",
+    "tcp", "tuya", "udp", "v4l2", "webtorrent", "wyze", "xiaomi",
 }
 
 MAX_BODY_DEFAULT = 8 * 1024 * 1024   # 8 MiB request body cap (safety valve)
@@ -724,6 +727,7 @@ EXEC_RE = re.compile(
     re.I)
 FFMPEG_CMD_RE = re.compile(r"#(command|input)\s*=", re.I)
 FFMPEG_ANY_RE = re.compile(r"ffmpeg\s*:", re.I)
+EXEC_SOURCE_RE = re.compile(r"(?i)\bexec\s*:")
 TEMPLATE_RE = re.compile(r"\{input\}", re.I)
 TRAVERSAL_RE = re.compile(r"(\.\./|/etc/(passwd|shadow)|\.env\b|file:/)", re.I)
 
@@ -762,6 +766,10 @@ def classify(method, path, query, body_text):
         severity = "high"
     elif FFMPEG_ANY_RE.search(probe) and ("config_write" in tags or "stream_write" in tags):
         tags.append("ffmpeg_source")
+    if EXEC_SOURCE_RE.search(probe):
+        # `exec:` runs its argument in a shell — go2rtc marks it insecure
+        tags.append("exec_source")
+        severity = "high"
     if EXEC_RE.search(probe):
         tags.append("exec_pattern")
         severity = "high"
@@ -779,6 +787,7 @@ def classify(method, path, query, body_text):
         "config_write": "TRAP HIT: attacker applying a config file — mirrored, nothing executed",
         "stream_write": "attacker adding/modifying a stream (config file patch path)",
         "ffmpeg_rce": "ffmpeg #command/#input parameter — classic go2rtc RCE payload",
+        "exec_source": "go2rtc exec: source — runs its argument in a shell (go2rtc marks it insecure)",
         "exec_pattern": "shell / reverse-shell pattern in payload",
         "template_inject": "{input} template abuse (arbitrary ffmpeg args)",
         "restart_attempt": "restart after config apply (editor.html flow) — runtime reloaded from fake config",

